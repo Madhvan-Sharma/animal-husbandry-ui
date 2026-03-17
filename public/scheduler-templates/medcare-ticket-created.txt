@@ -1,0 +1,17 @@
+Hi {{patientName}},
+
+Your consultation request has been created.
+
+Unique reference number (URN): {{urn}}
+{{#if symptoms}}
+
+Submitted symptoms: {{symptoms}}
+{{/if}}
+{{#if summary}}
+
+{{summary}}
+{{/if}}
+
+We will get back to you shortly. If you have any urgent concerns, please contact us.
+
+The Medcare team

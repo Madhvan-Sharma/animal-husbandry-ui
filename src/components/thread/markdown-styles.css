@@ -1,0 +1,84 @@
+/* Healthcare-themed markdown (Care Assistant responses) */
+.markdown-content code:not(pre code) {
+  background-color: oklch(0.94 0.02 192 / 0.8);
+  color: oklch(0.35 0.06 192);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+  border: 1px solid oklch(0.9 0.02 192);
+}
+
+.markdown-content a {
+  color: oklch(0.42 0.1 192);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.markdown-content a:hover {
+  text-decoration: underline;
+  color: oklch(0.35 0.1 192);
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid oklch(0.42 0.1 192);
+  padding-left: 1rem;
+  margin: 0.75em 0;
+  color: oklch(0.45 0.03 220);
+  background: oklch(0.98 0.008 192 / 0.5);
+  padding: 0.5em 1rem;
+  border-radius: 0 4px 4px 0;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-content ol {
+  list-style-type: decimal;
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-content li {
+  margin: 0.25em 0;
+  padding-left: 0.25em;
+}
+
+.markdown-content li p {
+  margin: 0;
+  display: inline;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  background: oklch(0.96 0.015 192);
+  border: 1px solid oklch(0.9 0.02 192);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid oklch(0.9 0.02 192);
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid oklch(0.9 0.02 192);
+  padding: 8px 10px;
+}
+
+.markdown-content th {
+  background-color: oklch(0.96 0.02 192);
+  font-weight: 600;
+  color: oklch(0.3 0.03 220);
+}
+
+.markdown-content tr:nth-child(even) {
+  background-color: oklch(0.985 0.008 192);
+}

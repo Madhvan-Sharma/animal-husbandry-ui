@@ -1,0 +1,17 @@
+Hi {{patientName}},
+
+{{#if daysSinceAppointmentText}}
+Your last appointment was {{daysSinceAppointmentText}}.
+
+Appointment date: {{appointmentDateFormatted}}
+Doctor name: {{doctorName}}
+Specialization: {{doctorSpecialization}}
+
+{{/if}}
+{{#if warningMessage}}
+---
+{{warningMessage}}
+
+{{/if}}
+Take care,
+The Medcare team

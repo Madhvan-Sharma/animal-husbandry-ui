@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "../components/thread/markdown-styles.css";
+
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Healthcare palette: teal/sage, warm off-white, clinical clarity */
+  --background: oklch(0.982 0.004 160);
+  --foreground: oklch(0.24 0.02 220);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.02 220);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.02 220);
+  --primary: oklch(0.42 0.1 192);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0.012 165);
+  --secondary-foreground: oklch(0.32 0.04 195);
+  --muted: oklch(0.96 0.01 165);
+  --muted-foreground: oklch(0.48 0.02 220);
+  --accent: oklch(0.94 0.02 165);
+  --accent-foreground: oklch(0.32 0.04 195);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.91 0.015 165);
+  --input: oklch(0.91 0.015 165);
+  --ring: oklch(0.42 0.1 192);
+  --chart-1: oklch(0.45 0.12 192);
+  --chart-2: oklch(0.55 0.1 165);
+  --chart-3: oklch(0.5 0.08 200);
+  --chart-4: oklch(0.6 0.08 180);
+  --chart-5: oklch(0.5 0.1 175);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.98 0.006 165);
+  --sidebar-foreground: oklch(0.24 0.02 220);
+  --sidebar-primary: oklch(0.42 0.1 192);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.94 0.02 165);
+  --sidebar-accent-foreground: oklch(0.32 0.04 195);
+  --sidebar-border: oklch(0.91 0.015 165);
+  --sidebar-ring: oklch(0.42 0.1 192);
+}
+
+.dark {
+  --background: oklch(0.18 0.02 220);
+  --foreground: oklch(0.95 0.01 165);
+  --card: oklch(0.22 0.02 220);
+  --card-foreground: oklch(0.95 0.01 165);
+  --popover: oklch(0.22 0.02 220);
+  --popover-foreground: oklch(0.95 0.01 165);
+  --primary: oklch(0.55 0.1 192);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.28 0.03 195);
+  --secondary-foreground: oklch(0.95 0.01 165);
+  --muted: oklch(0.28 0.02 195);
+  --muted-foreground: oklch(0.65 0.02 195);
+  --accent: oklch(0.3 0.04 195);
+  --accent-foreground: oklch(0.95 0.01 165);
+  --destructive: oklch(0.45 0.18 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.03 195);
+  --input: oklch(0.32 0.03 195);
+  --ring: oklch(0.55 0.1 192);
+  --chart-1: oklch(0.55 0.12 192);
+  --chart-2: oklch(0.6 0.1 165);
+  --chart-3: oklch(0.55 0.08 200);
+  --chart-4: oklch(0.65 0.08 180);
+  --chart-5: oklch(0.6 0.1 175);
+  --sidebar: oklch(0.2 0.02 220);
+  --sidebar-foreground: oklch(0.95 0.01 165);
+  --sidebar-primary: oklch(0.55 0.1 192);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.28 0.03 195);
+  --sidebar-accent-foreground: oklch(0.95 0.01 165);
+  --sidebar-border: oklch(0.32 0.03 195);
+  --sidebar-ring: oklch(0.55 0.1 192);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 50% -20%, oklch(0.96 0.02 192 / 0.4), transparent),
+      radial-gradient(ellipse 80% 50% at 100% 50%, oklch(0.97 0.01 165 / 0.25), transparent),
+      radial-gradient(ellipse 60% 40% at 0% 80%, oklch(0.98 0.008 175 / 0.2), transparent);
+  }
+
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"],
+  [type="reset"],
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  :root {
+    --chart-1: 217 91% 60%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 210 100% 56%;
+    --chart-4: 207 90% 54%;
+    --chart-5: 200 98% 39%;
+  }
+
+  .dark {
+    --chart-1: 217 91% 60%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 210 100% 56%;
+    --chart-4: 207 90% 54%;
+    --chart-5: 200 98% 39%;
+  }
+}
+
+@keyframes rainbow-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply border border-border/70 bg-card/80 backdrop-blur-md shadow-[0_18px_45px_-28px_rgba(15,23,42,0.65)];
+  }
+
+  .chat-shell {
+    background:
+      radial-gradient(circle at 15% 10%, oklch(0.97 0.018 150 / 0.5), transparent 45%),
+      radial-gradient(circle at 85% 20%, oklch(0.98 0.015 110 / 0.35), transparent 38%),
+      radial-gradient(circle at 60% 90%, oklch(0.99 0.01 185 / 0.35), transparent 42%);
+  }
+
+  .message-ai {
+    @apply rounded-2xl border border-primary/18 bg-primary/5 shadow-sm;
+  }
+
+  .message-human {
+    @apply rounded-2xl border border-border/60 bg-card/90 shadow-sm;
+  }
+
+  .shadow-inner-right {
+    box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
+  }
+
+  .shadow-inner-left {
+    box-shadow: inset 9px 0 6px -1px rgb(0 0 0 / 0.02);
+  }
+}

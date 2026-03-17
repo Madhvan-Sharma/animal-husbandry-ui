@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "d950aa38-2d4b-4292-9881-66a25205e511",
+      "name": "ticket-created-email",
+      "description": "Ticket created confirmation to madhvansharma28@gmail.com",
+      "enabled": false,
+      "deleteAfterRun": true,
+      "createdAtMs": 1771591632451,
+      "updatedAtMs": 1771591635100,
+      "schedule": {
+        "kind": "at",
+        "at": "2026-02-20T12:47:14.450Z"
+      },
+      "payload": {
+        "type": "ticket_created",
+        "to": "madhvansharma28@gmail.com",
+        "patientName": "Madhvan Sharma",
+        "urn": "699857d064ee5d2b31e505cf",
+        "summary": "We've received your request and will get back to you shortly.",
+        "symptoms": [],
+        "clinicalNotes": "Symptoms: ['fever', 'very low appetite']\nDuration of symptoms: 30 days\nEvaluated severity: CRITICAL\nEarly stage Diagnosis: Prolonged high fever\nUser History: ['User has had a fever for 30 days.', 'User has very low appetite.']\nSymptoms: ['fever', 'fatigue', 'chills']\nDuration of symptoms: 2 days\nEvaluated severity: MEDIUM\nEarly stage Diagnosis: Fever with fatigue and chills\nUser History: ['User has a fever for 2 days.', 'User is experiencing fatigue and chills.']\nSymptoms: ['cold']\nDuration of symptoms: 30 days\nEvaluated severity: LOW\nEarly stage Diagnosis: Cold\nUser History: ['User has a cold for 30 days.']\nSymptoms: ['cold']\nDuration of symptoms: 1 week\nEvaluated severity: MEDIUM\nEarly stage Diagnosis: typical cold\nUser History: ['User has a cold for 1 week.', 'User has no fever, chills, body aches, or fatigue.', \"User's cold gets worse at night.\", 'User has had this cold before.', 'User describes it as the same as usual.', 'User states it is affecting daily life.']\nSymptoms: ['trouble breathing']\nDuration of symptoms: 1 hour\nEvaluated severity: CRITICAL\nEarly stage Diagnosis: Difficulty breathing\nUser History: ['User is not able to breathe.']"
+      },
+      "state": {
+        "lastRunAtMs": 1771591634457,
+        "lastStatus": "error",
+        "lastDurationMs": 643,
+        "lastError": "Error: Message failed: 450 You have reached trial account unique recipients limit. #MS42225 You have reached trial account unique recipients limit. #MS42225",
+        "consecutiveErrors": 1
+      }
+    },
+    {
+      "id": "a56654a5-8c4c-4328-a1f0-d2b028e595d8",
+      "name": "ticket-created-email",
+      "description": "Ticket created confirmation to madhvansharma28@gmail.com",
+      "enabled": false,
+      "deleteAfterRun": true,
+      "createdAtMs": 1771593020753,
+      "updatedAtMs": 1771593023415,
+      "schedule": {
+        "kind": "at",
+        "at": "2026-02-20T13:10:22.752Z"
+      },
+      "payload": {
+        "type": "ticket_created",
+        "to": "madhvansharma28@gmail.com",
+        "patientName": "Madhvan Sharma",
+        "urn": "69985d3c64ee5d2b31e505d0",
+        "summary": "We've received your request and will get back to you shortly.",
+        "symptoms": [
+          "High Blood Pressure"
+        ],
+        "clinicalNotes": "Symptoms: ['fever', 'very low appetite']\nDuration of symptoms: 30 days\nEvaluated severity: CRITICAL\nEarly stage Diagnosis: Prolonged high fever\nUser History: ['User has had a fever for 30 days.', 'User has very low appetite.']\nSymptoms: ['fever', 'fatigue', 'chills']\nDuration of symptoms: 2 days\nEvaluated severity: MEDIUM\nEarly stage Diagnosis: Fever with fatigue and chills\nUser History: ['User has a fever for 2 days.', 'User is experiencing fatigue and chills.']\nSymptoms: ['cold']\nDuration of symptoms: 30 days\nEvaluated severity: LOW\nEarly stage Diagnosis: Cold\nUser History: ['User has a cold for 30 days.']\nSymptoms: ['cold']\nDuration of symptoms: 1 week\nEvaluated severity: MEDIUM\nEarly stage Diagnosis: typical cold\nUser History: ['User has a cold for 1 week.', 'User has no fever, chills, body aches, or fatigue.', \"User's cold gets worse at night.\", 'User has had this cold before.', 'User describes it as the same as usual.', 'User states it is affecting daily life.']\nSymptoms: ['trouble breathing']\nDuration of symptoms: 1 hour\nEvaluated severity: CRITICAL\nEarly stage Diagnosis: Difficulty breathing\nUser History: ['User is not able to breathe.']"
+      },
+      "state": {
+        "lastRunAtMs": 1771593022758,
+        "lastStatus": "error",
+        "lastDurationMs": 657,
+        "lastError": "Error: Message failed: 450 You have reached trial account unique recipients limit. #MS42225 You have reached trial account unique recipients limit. #MS42225",
+        "consecutiveErrors": 1
+      }
+    },
+    {
+      "id": "622f4e57-b546-4c4d-9583-8ad69751dc3c",
+      "name": "follow-up-email",
+      "description": "Follow-up: How is your health now? (to EMAIL_TO)",
+      "enabled": false,
+      "deleteAfterRun": true,
+      "createdAtMs": 1771599392914,
+      "updatedAtMs": 1771599512757,
+      "schedule": {
+        "kind": "at",
+        "at": "2026-02-20T14:58:32.741Z"
+      },
+      "payload": {
+        "type": "follow_up",
+        "patientName": "Madhvan Sharma"
+      },
+      "state": {
+        "lastRunAtMs": 1771599512756,
+        "lastStatus": "error",
+        "lastDurationMs": 1,
+        "lastError": "Unknown email type: follow_up",
+        "consecutiveErrors": 1
+      }
+    }
+  ]
+}

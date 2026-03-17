@@ -1,0 +1,9 @@
+Hello, {{patientName}},
+your appointment at Medcare is confirmed.
+
+Date & time: {{appointmentDatetimeFormatted}}
+Doctor: {{doctorName}}
+Specialization: {{doctorSpecialization}}
+Requested documents: {{requestedDocuments}}
+
+The Medcare team
