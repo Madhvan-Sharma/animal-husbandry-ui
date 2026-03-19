@@ -30,6 +30,7 @@ import type { ContentBlock } from "@/lib/multimodal-utils";
 
 interface Ticket {
   _id: string;
+  ticketCategory?: string;
   address?: string;
   city?: string;
   state?: string;
@@ -153,6 +154,14 @@ export default function Sidebar() {
               const docRequests = t.docRequests ?? [];
               const hasAppointment = !!t.appointment?.scheduledAt;
               const statusLabel = t.status === "closed" ? "Closed" : t.status?.replace(/_/g, " ") ?? "Open";
+              const categoryLabel =
+                (t.ticketCategory ?? "general") === "artificial_insemination"
+                  ? "Artificial Insemination"
+                  : "General";
+              const categoryClass =
+                (t.ticketCategory ?? "general") === "artificial_insemination"
+                  ? "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400"
+                  : "border-slate-400/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
 
               return (
                 <div
@@ -182,10 +191,15 @@ export default function Sidebar() {
                         {t.severity ?? "medium"}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground min-w-0">
-                      <span className="font-medium uppercase tracking-wider shrink-0">{statusLabel}</span>
-                      <span className="break-words min-w-0">
-                        Created {new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    <div className="flex items-start justify-between gap-2 min-w-0 text-[11px] text-muted-foreground">
+                      <div className="min-w-0">
+                        <div className="font-medium uppercase tracking-wider">{statusLabel}</div>
+                        <div className="break-words min-w-0">
+                          Created {new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                        </div>
+                      </div>
+                      <span className={cn("shrink-0 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold", categoryClass)}>
+                        {categoryLabel}
                       </span>
                     </div>
                     {hasAppointment && t.appointment && (

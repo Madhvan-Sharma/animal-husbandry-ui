@@ -57,6 +57,33 @@ function severityRank(s: string | undefined): number {
   return SEVERITY_ORDER[s?.toLowerCase() ?? "medium"] ?? 2;
 }
 
+type TicketCategory = "general" | "artificial_insemination";
+
+function normalizeCategory(value: string | undefined): TicketCategory {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (
+    normalized === "artificial_insemination" ||
+    normalized === "ai" ||
+    normalized === "artificial_insemenation"
+  ) {
+    return "artificial_insemination";
+  }
+  return "general";
+}
+
+function inferTicketCategory(
+  animalType: string | undefined,
+  symptoms: string[],
+  diagnosisText: string,
+  requestedCategory: string | undefined,
+): TicketCategory {
+  const isCow = (animalType ?? "").trim().toLowerCase() === "cow";
+  const haystack = `${symptoms.join(" ")} ${diagnosisText}`.toLowerCase();
+  const hasEstrusSignal = /\bestrus\b|\bheat\b|\bin heat\b/.test(haystack);
+  if (isCow && hasEstrusSignal) return "artificial_insemination";
+  return normalizeCategory(requestedCategory);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -149,6 +176,7 @@ export async function POST(request: NextRequest) {
       patientId,
       severity,
       attachments,
+      category,
     } = body as {
       userId?: string;
       symptoms?: string[];
@@ -174,6 +202,7 @@ export async function POST(request: NextRequest) {
       patientId?: string;
       severity?: string;
       attachments?: unknown;
+      category?: string;
     };
 
     if (!userId || !address) {
@@ -213,6 +242,12 @@ export async function POST(request: NextRequest) {
       diagnosisText = lines.join("\n");
     }
     const doc = {
+      ticketCategory: inferTicketCategory(
+        animalType,
+        Array.isArray(symptoms) ? symptoms : [],
+        diagnosisText,
+        category,
+      ),
       userId,
       symptoms: Array.isArray(symptoms) ? symptoms : [],
       diagnosis: diagnosisText,

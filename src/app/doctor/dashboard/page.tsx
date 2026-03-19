@@ -58,6 +58,7 @@ function severityRank(s: string | undefined): number {
 type Ticket = {
   _id: string;
   userId: string;
+  ticketCategory?: string;
   assignedDoctorId?: string | null;
   patientName?: string;
   patientAge?: string;
@@ -105,6 +106,7 @@ export default function VetDashboardPage() {
   const [medicineAiLoading, setMedicineAiLoading] = useState(false);
   /** Warning from doctor suggestion flow (NEXT_PUBLIC_DOCTOR_SUGGESTION_FLOW_ID); sent in follow-up email when closing. */
   const [doctorSuggestionWarning, setDoctorSuggestionWarning] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "general" | "artificial_insemination">("all");
 
   const DOCTOR_SUGGESTION_FLOW_ID =
     process.env.NEXT_PUBLIC_DOCTOR_SUGGESTION_FLOW_ID ?? "815bdacd-f85e-407f-89ee-3f53516cca2e";
@@ -583,6 +585,12 @@ export default function VetDashboardPage() {
     const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     return dateB - dateA;
   });
+  const matchesCategory = (t: Ticket) =>
+    categoryFilter === "all" || (t.ticketCategory ?? "general") === categoryFilter;
+  const filteredOpenTicketsSorted = openTicketsSorted.filter(matchesCategory);
+  const allCount = tickets.length;
+  const generalCount = tickets.filter((t) => (t.ticketCategory ?? "general") === "general").length;
+  const aiCount = tickets.filter((t) => (t.ticketCategory ?? "general") === "artificial_insemination").length;
   const closedTickets = tickets
     .filter((t) => (t.status ?? "open").toLowerCase() === "closed")
     .sort((a, b) => {
@@ -590,6 +598,7 @@ export default function VetDashboardPage() {
       const dateB = (b.closedAt || b.createdAt) ? new Date((b.closedAt || b.createdAt) as string).getTime() : 0;
       return dateB - dateA;
     });
+  const filteredClosedTickets = closedTickets.filter(matchesCategory);
 
   return (
     <div className="min-h-screen bg-background w-full">
@@ -756,7 +765,37 @@ export default function VetDashboardPage() {
           {/* Right: Open tickets table (full right side) */}
           <Card className="lg:col-span-8 overflow-hidden flex flex-col min-h-0">
             <CardHeader className="pb-4 shrink-0">
-              <CardTitle className="text-base font-medium">Open tickets</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base font-medium">Open tickets</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="vet-category-filter" className="text-xs text-muted-foreground">
+                    Category
+                  </Label>
+                  <select
+                    id="vet-category-filter"
+                    value={categoryFilter}
+                    onChange={(e) =>
+                      setCategoryFilter(e.target.value as "all" | "general" | "artificial_insemination")
+                    }
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    <option value="all">All</option>
+                    <option value="general">General</option>
+                    <option value="artificial_insemination">Artificial Insemination</option>
+                  </select>
+                  <div className="hidden sm:flex items-center gap-1.5">
+                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                      All ({allCount})
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                      General ({generalCount})
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-[10px] font-semibold text-fuchsia-700 dark:text-fuchsia-400">
+                      AI ({aiCount})
+                    </span>
+                  </div>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground">Click View to respond</p>
             </CardHeader>
             <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
@@ -765,7 +804,7 @@ export default function VetDashboardPage() {
                   <div className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent mb-3" />
                   Loading tickets…
                 </div>
-              ) : openTicketsSorted.length === 0 ? (
+              ) : filteredOpenTicketsSorted.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-sm rounded-b-xl bg-muted/10">
                   No open tickets.
                 </div>
@@ -776,6 +815,7 @@ export default function VetDashboardPage() {
                       <tr className="border-b border-border">
                         <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider">Owner</th>
                         <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-24">Animal</th>
+                        <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-32">Category</th>
                         <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-24">Severity</th>
                         <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-28">Status</th>
                         <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider">Symptoms</th>
@@ -784,7 +824,7 @@ export default function VetDashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {openTicketsSorted.map((t) => (
+                      {filteredOpenTicketsSorted.map((t) => (
                         <tr
                           key={t._id}
                           className={cn(
@@ -807,6 +847,11 @@ export default function VetDashboardPage() {
                                 ? String(t.animalType).trim()
                                 : "—"}
                             </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-sm text-muted-foreground">
+                            {(t.ticketCategory ?? "general") === "artificial_insemination"
+                              ? "Artificial Insemination"
+                              : "General"}
                           </td>
                           <td className="py-3.5 px-4">
                             <span
@@ -858,7 +903,7 @@ export default function VetDashboardPage() {
         </div>
 
         {/* Closed tickets - separate block */}
-        {!loading && closedTickets.length > 0 && (
+        {!loading && filteredClosedTickets.length > 0 && (
           <Card className="overflow-hidden flex flex-col min-h-0">
             <CardHeader className="pb-4 shrink-0">
               <CardTitle className="text-base font-medium">Closed tickets</CardTitle>
@@ -871,6 +916,7 @@ export default function VetDashboardPage() {
                     <tr className="border-b border-border">
                       <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider">Owner</th>
                       <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-24">Animal</th>
+                      <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-32">Category</th>
                       <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-24">Severity</th>
                       <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider">Symptoms</th>
                       <th className="text-left py-3.5 px-4 font-medium text-muted-foreground text-xs uppercase tracking-wider w-28">Closed</th>
@@ -878,7 +924,7 @@ export default function VetDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {closedTickets.map((t) => (
+                    {filteredClosedTickets.map((t) => (
                       <tr
                         key={t._id}
                         className={cn(
@@ -901,6 +947,11 @@ export default function VetDashboardPage() {
                               ? String(t.animalType).trim()
                               : "—"}
                           </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-sm text-muted-foreground">
+                          {(t.ticketCategory ?? "general") === "artificial_insemination"
+                            ? "Artificial Insemination"
+                            : "General"}
                         </td>
                         <td className="py-3.5 px-4">
                           <span
@@ -1054,6 +1105,14 @@ export default function VetDashboardPage() {
                         {selected.animalType && String(selected.animalType).trim()
                           ? String(selected.animalType).trim()
                           : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Category</p>
+                      <p className="text-sm text-foreground">
+                        {(selected.ticketCategory ?? "general") === "artificial_insemination"
+                          ? "Artificial Insemination"
+                          : "General"}
                       </p>
                     </div>
                     <div>

@@ -25,6 +25,36 @@ interface CreateTicketDialogProps {
   onCreated?: () => void;
 }
 
+type TicketCategory = "general" | "artificial_insemination";
+
+function labelToCategory(value: string | undefined): TicketCategory {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (
+    normalized === "artificial_insemination" ||
+    normalized === "ai" ||
+    normalized === "artificial_insemenation"
+  ) {
+    return "artificial_insemination";
+  }
+  return "general";
+}
+
+function deriveCategoryFromDiagnosis(
+  animalType: string,
+  diagnosisSymptoms: string[],
+  diagnosisRelevantMessages: string[],
+  suggestedCategory: string | undefined,
+): TicketCategory {
+  const fromModel = labelToCategory(suggestedCategory);
+  const isCow = animalType.trim().toLowerCase() === "cow";
+  const haystack = [...diagnosisSymptoms, ...diagnosisRelevantMessages]
+    .join(" ")
+    .toLowerCase();
+  const hasEstrusSignal = /\bestrus\b|\bheat\b|\bin heat\b/.test(haystack);
+  if (isCow && hasEstrusSignal) return "artificial_insemination";
+  return fromModel;
+}
+
 function getPatientDefaults() {
   return {
     name: process.env.NEXT_PUBLIC_USER_NAME ?? process.env.NEXT_PUBLIC_PATIENT_NAME ?? "",
@@ -73,6 +103,7 @@ export function CreateTicketDialog({
   const [diagnosisRelevantMessages, setDiagnosisRelevantMessages] = useState<string[]>([]);
   const [diagnosisSeverity, setDiagnosisSeverity] = useState<"low" | "medium" | "high" | "critical">("medium");
   const [diagnosisAnimalType, setDiagnosisAnimalType] = useState<string>("");
+  const [ticketCategory, setTicketCategory] = useState<TicketCategory>("general");
   const imageUploadRef = useRef<HTMLInputElement>(null);
   const [extraImages, setExtraImages] = useState<ContentBlock[]>([]);
 
@@ -119,6 +150,7 @@ export function CreateTicketDialog({
       setDiagnosisRelevantMessages([]);
       setDiagnosisSeverity("medium");
       setDiagnosisAnimalType("");
+      setTicketCategory("general");
       setExtraImages([]);
 
       const sessionId = stream.sessionId;
@@ -141,16 +173,19 @@ export function CreateTicketDialog({
               relevantMessages?: string[];
               severity?: string;
               animalType?: string;
+              ticketCategory?: string;
             };
-            setDiagnosisSymptoms(Array.isArray(data.symptoms) ? data.symptoms : []);
+            const nextDiagnosisSymptoms = Array.isArray(data.symptoms) ? data.symptoms : [];
+            setDiagnosisSymptoms(nextDiagnosisSymptoms);
             setDiagnosisDuration(
               typeof data.durationOfSymptoms === "string"
                 ? data.durationOfSymptoms
                 : "",
             );
-            setDiagnosisRelevantMessages(
-              Array.isArray(data.relevantMessages) ? data.relevantMessages : [],
-            );
+            const nextRelevantMessages = Array.isArray(data.relevantMessages)
+              ? data.relevantMessages
+              : [];
+            setDiagnosisRelevantMessages(nextRelevantMessages);
             if (typeof data.severity === "string") {
               const sev = data.severity.toLowerCase();
               if (sev === "low" || sev === "medium" || sev === "high" || sev === "critical") {
@@ -169,8 +204,24 @@ export function CreateTicketDialog({
                 // Use AI-identified animal type to prefill the dropdown, but allow manual override.
                 setAnimalType(at);
               }
+              setTicketCategory(
+                deriveCategoryFromDiagnosis(
+                  at || animalType,
+                  nextDiagnosisSymptoms,
+                  nextRelevantMessages,
+                  data.ticketCategory,
+                ),
+              );
             } else {
               setDiagnosisAnimalType("");
+              setTicketCategory(
+                deriveCategoryFromDiagnosis(
+                  animalType,
+                  nextDiagnosisSymptoms,
+                  nextRelevantMessages,
+                  data.ticketCategory,
+                ),
+              );
             }
           })
           .catch((err) => {
@@ -216,6 +267,7 @@ export function CreateTicketDialog({
           userId,
           symptoms,
           animalType,
+          category: ticketCategory,
           severity: diagnosisSeverity,
           diagnosis: {
             symptoms: diagnosisSymptoms,
@@ -448,6 +500,38 @@ export function CreateTicketDialog({
                   />
                 </div>
               </div>
+            </section>
+
+            {/* Additional symptoms */}
+            <section className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground tracking-tight">
+                Ticket category
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Button
+                  type="button"
+                  variant={ticketCategory === "general" ? "default" : "outline"}
+                  className="h-auto min-h-12 justify-start text-left px-4 py-3"
+                  onClick={() => setTicketCategory("general")}
+                  disabled={submitting}
+                >
+                  <span className="font-medium">General</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant={ticketCategory === "artificial_insemination" ? "default" : "outline"}
+                  className="h-auto min-h-12 justify-start text-left px-4 py-3"
+                  onClick={() => setTicketCategory("artificial_insemination")}
+                  disabled={submitting}
+                >
+                  <span className="font-medium">Artificial Insemination</span>
+                </Button>
+              </div>
+              {stream.messages.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Category is auto-selected from AI diagnosis. You can still change it.
+                </p>
+              )}
             </section>
 
             {/* Additional symptoms */}

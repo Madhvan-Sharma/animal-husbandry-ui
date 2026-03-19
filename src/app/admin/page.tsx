@@ -26,6 +26,7 @@ import { parseAiDiagnosis, getDiagnosisFieldLabel } from "@/lib/parse-ai-diagnos
 type TicketRow = {
   _id: string;
   userId: string;
+  ticketCategory?: string;
   assignedDoctorId?: string | null;
   patientName?: string;
   patientAge?: string;
@@ -78,6 +79,7 @@ export default function AdminPage() {
   const [viewingTicket, setViewingTicket] = useState<TicketRow | null>(null);
   const [selectedVetId, setSelectedVetId] = useState<string>("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "general" | "artificial_insemination">("all");
 
   const ragUploadInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<RAGDocument[]>([]);
@@ -292,6 +294,13 @@ export default function AdminPage() {
       const dateB = b.closedAt ? new Date(b.closedAt).getTime() : 0;
       return dateB - dateA;
     });
+  const matchesCategory = (t: TicketRow) =>
+    categoryFilter === "all" || (t.ticketCategory ?? "general") === categoryFilter;
+  const filteredOpenTickets = openTickets.filter(matchesCategory);
+  const filteredClosedTickets = closedTickets.filter(matchesCategory);
+  const allCount = tickets.length;
+  const generalCount = tickets.filter((t) => (t.ticketCategory ?? "general") === "general").length;
+  const aiCount = tickets.filter((t) => (t.ticketCategory ?? "general") === "artificial_insemination").length;
 
   // Chart data: vet load (open tickets per vet)
   const STATUS_COLORS = { Unassigned: "#94a3b8", "Assigned (open)": "#3b82f6", Closed: "#22c55e" };
@@ -617,10 +626,40 @@ export default function AdminPage() {
             {/* Live tickets table */}
             <Card className="bg-card shadow-sm flex flex-col min-h-0">
               <CardHeader className="shrink-0">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Ticket className="size-4" />
-                  Live tickets
-                </CardTitle>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Ticket className="size-4" />
+                    Live tickets
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="admin-category-filter" className="text-xs text-muted-foreground">
+                      Category
+                    </Label>
+                    <select
+                      id="admin-category-filter"
+                      value={categoryFilter}
+                      onChange={(e) =>
+                        setCategoryFilter(e.target.value as "all" | "general" | "artificial_insemination")
+                      }
+                      className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    >
+                      <option value="all">All</option>
+                      <option value="general">General</option>
+                      <option value="artificial_insemination">Artificial Insemination</option>
+                    </select>
+                    <div className="hidden sm:flex items-center gap-1.5">
+                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                        All ({allCount})
+                      </span>
+                      <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                        General ({generalCount})
+                      </span>
+                      <span className="inline-flex items-center rounded-full bg-fuchsia-500/10 px-2 py-0.5 text-[10px] font-semibold text-fuchsia-700 dark:text-fuchsia-400">
+                        AI ({aiCount})
+                      </span>
+                    </div>
+                  </div>
+                </div>
                 <CardDescription>
                   Open tickets. Assign to a vet or close. Only assigned tickets appear on the vet dashboard.
                 </CardDescription>
@@ -628,7 +667,7 @@ export default function AdminPage() {
               <CardContent className="flex-1 min-h-0 overflow-auto">
                 {loading ? (
                   <div className="text-center py-12 text-muted-foreground text-sm">Loading…</div>
-                ) : openTickets.length === 0 ? (
+                ) : filteredOpenTickets.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground text-sm">No live tickets.</div>
                 ) : (
                   <div className="rounded-lg border overflow-x-auto">
@@ -637,6 +676,7 @@ export default function AdminPage() {
                         <tr className="border-b bg-muted/50">
                           <th className="text-left p-3 font-medium">User</th>
                           <th className="text-left p-3 font-medium">Animal</th>
+                          <th className="text-left p-3 font-medium">Category</th>
                           <th className="text-left p-3 font-medium">Severity</th>
                           <th className="text-left p-3 font-medium">Status</th>
                           <th className="text-left p-3 font-medium">Assigned to</th>
@@ -645,12 +685,17 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {openTickets.map((t) => (
+                        {filteredOpenTickets.map((t) => (
                           <tr key={t._id} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="p-3">
                               <span className="font-medium">{t.patientName || "—"}</span>
                             </td>
                             <td className="p-3">{t.animalType || "—"}</td>
+                            <td className="p-3">
+                              {(t.ticketCategory ?? "general") === "artificial_insemination"
+                                ? "Artificial Insemination"
+                                : "General"}
+                            </td>
                             <td className="p-3 capitalize">{t.severity ?? "medium"}</td>
                             <td className="p-3 capitalize">{t.status ?? "open"}</td>
                             <td className="p-3">{getVetName(t.assignedDoctorId)}</td>
@@ -720,7 +765,7 @@ export default function AdminPage() {
               <CardContent className="flex-1 min-h-0 overflow-auto">
                 {loading ? (
                   <div className="text-center py-12 text-muted-foreground text-sm">Loading…</div>
-                ) : closedTickets.length === 0 ? (
+                ) : filteredClosedTickets.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground text-sm">No closed tickets.</div>
                 ) : (
                   <div className="rounded-lg border overflow-x-auto">
@@ -729,6 +774,7 @@ export default function AdminPage() {
                         <tr className="border-b bg-muted/50">
                           <th className="text-left p-3 font-medium">User</th>
                           <th className="text-left p-3 font-medium">Animal</th>
+                          <th className="text-left p-3 font-medium">Category</th>
                           <th className="text-left p-3 font-medium">Severity</th>
                           <th className="text-left p-3 font-medium">Assigned to</th>
                           <th className="text-left p-3 font-medium">Closed</th>
@@ -736,12 +782,17 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {closedTickets.map((t) => (
+                        {filteredClosedTickets.map((t) => (
                           <tr key={t._id} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="p-3">
                               <span className="font-medium">{t.patientName || "—"}</span>
                             </td>
                             <td className="p-3">{t.animalType || "—"}</td>
+                            <td className="p-3">
+                              {(t.ticketCategory ?? "general") === "artificial_insemination"
+                                ? "Artificial Insemination"
+                                : "General"}
+                            </td>
                             <td className="p-3 capitalize">{t.severity ?? "medium"}</td>
                             <td className="p-3">{getVetName(t.assignedDoctorId)}</td>
                             <td className="p-3 text-muted-foreground">
@@ -900,6 +951,14 @@ export default function AdminPage() {
                         <div>
                           <p className="text-xs font-medium text-muted-foreground mb-0.5">Animal type</p>
                           <p className="capitalize">{t.animalType?.trim() || "—"}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-0.5">Category</p>
+                          <p>
+                            {(t.ticketCategory ?? "general") === "artificial_insemination"
+                              ? "Artificial Insemination"
+                              : "General"}
+                          </p>
                         </div>
                         <div>
                           <p className="text-xs font-medium text-muted-foreground mb-0.5">Symptoms</p>

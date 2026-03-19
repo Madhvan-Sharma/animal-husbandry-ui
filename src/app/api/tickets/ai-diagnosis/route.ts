@@ -38,6 +38,9 @@ Return a JSON object with:
 - "animalType": a short string describing the most likely type of animal the owner is talking about.
   - Use common names like "cow", "buffalo", "goat", "sheep", "pig", "chicken", etc.
   - If you truly cannot tell, use an empty string "".
+- "ticketCategory": choose the best ticket category for triage.
+  - Choose exactly one of: "general", "artificial_insemination".
+  - If conversation suggests estrus/heat timing in cow/buffalo, prefer "artificial_insemination".
 
 Return ONLY raw JSON, no markdown, no explanation.
 `;
@@ -140,26 +143,43 @@ export async function POST(request: NextRequest) {
       relevantMessages?: string[];
       severity?: string;
       animalType?: string;
+      ticketCategory?: string;
     };
+
+    const normalizedAnimalType =
+      typeof result.animalType === "string" ? result.animalType.trim() : "";
+    const normalizedCategory =
+      typeof result.ticketCategory === "string"
+        ? result.ticketCategory.trim().toLowerCase().replace(/\s+/g, "_")
+        : "general";
+    const symptoms = Array.isArray(result.symptoms) ? result.symptoms : [];
+    const relevantMessages = Array.isArray(result.relevantMessages)
+      ? result.relevantMessages
+      : [];
+    const hasEstrusSignal = /\bestrus\b|\bheat\b|\bin heat\b/.test(
+      [...symptoms, ...relevantMessages].join(" ").toLowerCase(),
+    );
+    const forcedCategory =
+      normalizedAnimalType.toLowerCase() === "cow" && hasEstrusSignal
+        ? "artificial_insemination"
+        : normalizedCategory === "artificial_insemination"
+          ? "artificial_insemination"
+          : "general";
 
     return NextResponse.json(
       {
-        symptoms: Array.isArray(result.symptoms) ? result.symptoms : [],
+        symptoms,
         durationOfSymptoms:
           typeof result.durationOfSymptoms === "string"
             ? result.durationOfSymptoms
             : "",
-        relevantMessages: Array.isArray(result.relevantMessages)
-          ? result.relevantMessages
-          : [],
+        relevantMessages,
         severity:
           typeof result.severity === "string"
             ? result.severity.toLowerCase()
             : "medium",
-        animalType:
-          typeof result.animalType === "string"
-            ? result.animalType.trim()
-            : "",
+        animalType: normalizedAnimalType,
+        ticketCategory: forcedCategory,
       },
       { status: 200 },
     );

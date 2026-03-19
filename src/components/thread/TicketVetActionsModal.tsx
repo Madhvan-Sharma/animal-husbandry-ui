@@ -27,6 +27,7 @@ import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 
 export interface TicketForActions {
   _id: string;
+  ticketCategory?: string;
   status?: string;
   createdAt: string;
   closedAt?: string | null;
@@ -216,6 +217,14 @@ export function TicketVetActionsModal({
     low: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
   };
   const severityClass = severityColors[(ticket.severity ?? "medium").toLowerCase()] ?? severityColors.medium;
+  const categoryLabel =
+    (ticket.ticketCategory ?? "general") === "artificial_insemination"
+      ? "Artificial Insemination"
+      : "General";
+  const categoryClass =
+    (ticket.ticketCategory ?? "general") === "artificial_insemination"
+      ? "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400"
+      : "border-slate-400/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -259,6 +268,9 @@ export function TicketVetActionsModal({
                   <div className="flex flex-wrap gap-2">
                     <span className={cn("inline-flex rounded-md border px-2 py-0.5 text-xs font-medium capitalize", severityClass)}>
                       {ticket.severity ?? "medium"}
+                    </span>
+                    <span className={cn("inline-flex rounded-md border px-2 py-0.5 text-xs font-medium", categoryClass)}>
+                      {categoryLabel}
                     </span>
                     <span className="inline-flex rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs font-medium capitalize text-muted-foreground">
                       {statusLabel}
