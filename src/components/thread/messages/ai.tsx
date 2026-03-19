@@ -22,9 +22,12 @@ export function AssistantMessage({
   const isEmpty = !raw || raw.length === 0;
   const suggestsConsultation = contentSuggestsConsultation(raw ?? "");
   const createTicket = useCreateTicketOptional();
+
+  // Remove the internal marker so the user never sees it (still usable for UI trigger).
+  const displayRaw = (raw ?? "").replace(/<<TICKET_REQUIRED>>/g, "").trim();
   // Convert literal \n in API output to actual newlines, then fix concatenated bold
   const contentString =
-    raw
+    displayRaw
       ?.replace(/\\r\\n|\\n|\\r/g, "\n")
       .replace(/([.:)])\s*(\*{2,3})(?=[A-Z])/g, "$1\n\n$2")
       .replace(/(\*{3})\s*(\*{3})(?=[A-Z])/g, "$1\n\n$2") ?? "";
@@ -52,7 +55,7 @@ export function AssistantMessage({
           </>
         ) : null}
         {!isEmpty && (
-          <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2 mt-2">
             <CommandBar
               content={raw}
               isLoading={isLoading}

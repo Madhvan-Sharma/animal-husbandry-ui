@@ -41,6 +41,7 @@ import type { ContentBlock } from "@/lib/multimodal-utils";
 import { CreateTicketProvider } from "./CreateTicketContext";
 import { CreateTicketDialog } from "./CreateTicketDialog";
 import { AutoResolvedSteps } from "./AutoResolvedSteps";
+import { LoggedInUser } from "@/components/auth/logged-in-user";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -164,6 +165,9 @@ export function Thread() {
   });
 
   const lastAiMessageRef = useRef<string>("");
+  const ttsTimeoutRef = useRef<number | null>(null);
+  const pendingTtsForMessageRef = useRef<string | null>(null);
+  const sttSubmitTimeoutRef = useRef<number | null>(null);
   const isSubmittingFromSttRef = useRef(false);
 
   const lastError = useRef<string | undefined>(undefined);
@@ -220,14 +224,25 @@ export function Thread() {
       const messageText = lastMessage.content.trim();
       // Only speak if it's a new message and not empty
       if (messageText && messageText !== lastAiMessageRef.current) {
-        lastAiMessageRef.current = messageText;
         // Wait a bit for the message to fully render, then speak
         const timer = setTimeout(() => {
+          // Mark as spoken only when we actually trigger speech.
+          lastAiMessageRef.current = messageText;
+          pendingTtsForMessageRef.current = null;
           speak(messageText);
         }, 500);
-        return () => clearTimeout(timer);
+        pendingTtsForMessageRef.current = messageText;
+        // Keep a handle so the speech toggle can cancel pending speech.
+        ttsTimeoutRef.current = timer as unknown as number;
       }
     }
+    return () => {
+      if (ttsTimeoutRef.current !== null) {
+        clearTimeout(ttsTimeoutRef.current);
+        ttsTimeoutRef.current = null;
+      }
+      pendingTtsForMessageRef.current = null;
+    };
   }, [messages, isLoading, ttsEnabled, ttsSupported, speak]);
 
   // Handle STT errors
@@ -248,12 +263,13 @@ export function Thread() {
       // User stopped recording and we have a transcript
       const finalText = transcript.trim();
       if (finalText) {
+        // Prevent any duplicate scheduling while we wait for the 500ms UX delay.
+        isSubmittingFromSttRef.current = true;
         // Populate input field briefly so user can see what was transcribed
         setInput(finalText);
         
         // Small delay to show the transcript, then auto-submit
         const submitTimer = setTimeout(() => {
-          isSubmittingFromSttRef.current = true;
           setFirstTokenReceived(false);
           resetTranscript();
           
@@ -268,14 +284,30 @@ export function Thread() {
             })
             .finally(() => {
               isSubmittingFromSttRef.current = false;
+              sttSubmitTimeoutRef.current = null;
               setInput(""); // Clear input after submission
             });
         }, 500); // 500ms delay to show transcript
+        sttSubmitTimeoutRef.current = submitTimer as unknown as number;
 
-        return () => clearTimeout(submitTimer);
+        return () => {
+          clearTimeout(submitTimer);
+          sttSubmitTimeoutRef.current = null;
+          // If we canceled before the submit fired, allow future submissions.
+          isSubmittingFromSttRef.current = false;
+        };
       }
     }
   }, [isListening, transcript, resetTranscript, stopTts, stream]);
+
+  // If the user starts speaking again, cancel any pending auto-submit.
+  useEffect(() => {
+    if (isListening && sttSubmitTimeoutRef.current !== null) {
+      clearTimeout(sttSubmitTimeoutRef.current);
+      sttSubmitTimeoutRef.current = null;
+      isSubmittingFromSttRef.current = false;
+    }
+  }, [isListening]);
 
   // Stop TTS if user starts recording
   useEffect(() => {
@@ -334,8 +366,12 @@ export function Thread() {
   };
 
   const handleNewChat = () => {
-    stream.setSessionId(null);
-    window.location.reload();
+    stream
+      .newChat()
+      .catch((e) => {
+        console.error("Failed to start new chat:", e);
+        toast.error("Could not start a new conversation");
+      });
   };
   const chatStarted = !!messages.length;
 
@@ -435,6 +471,10 @@ export function Thread() {
               </motion.button>
             </div>
             <div className="flex items-center gap-1">
+              <LoggedInUser
+                compact
+                className="hidden sm:block bg-background/40"
+              />
               <NotificationsBell />
               <TooltipIconButton
                 size="lg"
@@ -645,6 +685,12 @@ export function Thread() {
                               if (isSpeaking) {
                                 stopTts();
                               }
+                          // Cancel any pending scheduled speech.
+                          if (ttsTimeoutRef.current !== null) {
+                            clearTimeout(ttsTimeoutRef.current);
+                            ttsTimeoutRef.current = null;
+                          }
+                          pendingTtsForMessageRef.current = null;
                               setTtsEnabled(!ttsEnabled);
                             }}
                             className={cn(

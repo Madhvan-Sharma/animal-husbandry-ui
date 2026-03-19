@@ -15,8 +15,15 @@ import {
   XCircle,
   User,
   ClipboardList,
+  Image as ImageIcon,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
+import { fileToContentBlock, type ContentBlock } from "@/lib/multimodal-utils";
+import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 
 export interface TicketForActions {
   _id: string;
@@ -33,6 +40,7 @@ export interface TicketForActions {
   symptoms?: string[];
   animalType?: string;
   diagnosis?: string;
+  attachments?: ContentBlock[];
 }
 
 type TimelineEvent = {
@@ -158,7 +166,45 @@ export function TicketVetActionsModal({
   open,
   onOpenChange,
 }: TicketVetActionsModalProps) {
+  const ticketId = ticket?._id ?? "";
+  const [attachments, setAttachments] = useState<ContentBlock[]>(
+    Array.isArray(ticket?.attachments) ? (ticket?.attachments as ContentBlock[]) : [],
+  );
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAttachments(Array.isArray(ticket?.attachments) ? (ticket?.attachments as ContentBlock[]) : []);
+  }, [ticketId, ticket?.attachments]);
+
   if (!ticket) return null;
+
+  const handleAddImages = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (uploading) return;
+    setUploading(true);
+    try {
+      const blocks = await Promise.all(files.slice(0, 8).map((f) => fileToContentBlock(f)));
+      const res = await fetch(`/api/tickets/${ticket._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addImages: blocks }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error || "Failed to upload images");
+      }
+      const updated = Array.isArray((data as { attachments?: unknown }).attachments)
+        ? ((data as { attachments?: ContentBlock[] }).attachments ?? [])
+        : [...attachments, ...blocks];
+      setAttachments(updated);
+      toast.success(`Added ${blocks.length} image${blocks.length === 1 ? "" : "s"} to the ticket`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to upload images");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const events = buildTimeline(ticket);
 
@@ -175,10 +221,22 @@ export function TicketVetActionsModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-[95vw] min-h-[480px] max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
         <DialogHeader className="shrink-0 px-6 py-4 border-b border-border bg-muted/20">
-          <DialogTitle className="text-xl font-semibold flex items-center gap-2">
-            <TicketIcon className="size-5 text-muted-foreground" />
-            Ticket details & vet actions
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle className="text-xl font-semibold flex items-center gap-2">
+              <TicketIcon className="size-5 text-muted-foreground" />
+              Ticket details & vet actions
+            </DialogTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-muted-foreground hover:text-foreground"
+              onClick={() => onOpenChange(false)}
+              aria-label="Close"
+            >
+              <XCircle className="size-5" />
+            </Button>
+          </div>
         </DialogHeader>
         <div className="flex-1 grid grid-cols-1 md:grid-cols-[340px_1fr] min-h-0 overflow-hidden">
           {/* Left: Ticket details */}
@@ -211,6 +269,7 @@ export function TicketVetActionsModal({
                   </p>
                 </div>
               </div>
+
               {(ticket.animalType || (ticket.symptoms?.length ?? 0) > 0) && (
                 <div>
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-2">
@@ -239,6 +298,49 @@ export function TicketVetActionsModal({
                   </div>
                 </div>
               )}
+
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <ImageIcon className="size-3.5" />
+                    Images
+                  </h3>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={async (e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      await handleAddImages(files);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    <Upload className="size-3.5 mr-1.5" />
+                    Add
+                  </Button>
+                </div>
+                <div className="rounded-xl border border-border bg-background/80 p-4">
+                  {attachments.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No images attached yet.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {attachments.map((b, idx) => (
+                        <MultimodalPreview key={idx} block={b} size="md" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
           {/* Right: Flow / timeline */}

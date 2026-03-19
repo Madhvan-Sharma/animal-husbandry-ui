@@ -10,16 +10,25 @@ type ChatMessageDoc = {
 };
 
 const PROMPT = `
-You are a veterinary assistant AI for an animal husbandry platform. Given the following **owner chat history about their animal**, extract and return a JSON object with:
+You are a veterinary assistant AI for an animal husbandry platform.
+
+Your task: extract "AI-suggested symptoms" from the assistant's own medical reasoning (i.e. what the AI concluded/identified as symptoms from the conversation).
+
+Given the following chat history, prioritize the **latest ASSISTANT message** as the primary source of truth.
+If there is no assistant message, fall back to the owner's messages.
+
+Return a JSON object with:
 
 - "symptoms": an array of **concise, medically relevant symptom phrases** the patient clearly mentioned (for example: "reduced feed intake", "fever", "laboured breathing", "swollen udder").
-  - Do NOT include vague impressions like "looks not normal", "seems off", "something is wrong", or purely visual/emotional descriptions.
-  - Each item must be a specific clinical sign or symptom, not a full sentence.
+  - These should be symptoms/signs the ASSISTANT identified or discussed as relevant (can be inferred/structured by the assistant).
+  - Do NOT include vague impressions like "looks not normal", "seems off", "something is wrong".
+  - Each item must be a specific clinical sign or symptom phrase, not a full sentence.
 - "durationOfSymptoms": a short string describing how long the symptoms have been present (for example: "3 days", "since yesterday evening").
   - If the duration is unclear, use an empty string "".
-- "relevantMessages": an array of **direct quotes from the patient's own messages** that are medically relevant (symptoms, duration, changes in behaviour, appetite, milk yield, etc.).
-  - Each item must be a **verbatim snippet** copied from the patient text, not paraphrased.
-  - Do NOT include the assistant's messages or generic chat like greetings.
+- "relevantMessages": an array of short, passive **paraphrases derived ONLY from USER messages** that capture medically relevant info (symptoms, duration, appetite, milk yield, behaviour changes).
+  - Do NOT quote the user verbatim.
+  - Phrase each item like a neutral note, e.g. "User's cow feels lazy", "User reports reduced appetite", "User noticed swelling near the udder".
+  - Do NOT include greetings or generic chat.
 - "severity": a string describing how urgent/serious the condition appears to be based on the information provided.
   - Choose **exactly one** of: "low", "medium", "high", "critical".
   - "low" = mild, self-limiting signs, animal otherwise bright and eating.
@@ -59,8 +68,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const assistantMessages = messages.filter((m) => m.role === "assistant");
     const userMessages = messages.filter((m) => m.role === "user");
-    const historyText = (userMessages.length ? userMessages : messages)
+
+    // Primary input: the assistant's latest message (what the AI concluded).
+    // Fallback: the user's messages (so the feature still works when assistant text isn't stored).
+    const primaryText =
+      assistantMessages.length > 0
+        ? assistantMessages[assistantMessages.length - 1]!.content
+        : userMessages.map((m) => m.content).join("\n");
+
+    const userText = userMessages.map((m) => m.content).join("\n");
+
+    // Include full history as context (optional), but keep the "primary" section prominent.
+    const historyText = messages
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
       .join("\n");
 
@@ -84,7 +105,10 @@ export async function POST(request: NextRequest) {
         { role: "system", content: PROMPT.trim() },
         {
           role: "user",
-          content: `Chat history:\n${historyText}`,
+          content:
+            `Assistant answer (primary for symptoms):\n${primaryText}\n\n` +
+            `User messages (ONLY source for relevantMessages):\n${userText}\n\n` +
+            `Full chat history (context):\n${historyText}`,
         },
       ],
       temperature: 0.2,

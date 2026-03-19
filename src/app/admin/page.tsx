@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { LogOut, UserPlus, XCircle, Ticket, Stethoscope, Users, BarChart3, PieChart as PieChartIcon, Eye, User, Mail, Phone, MapPin, ClipboardList, MessageSquare, FileText } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LogOut, UserPlus, XCircle, Ticket, Users, BarChart3, PieChart as PieChartIcon, Eye, User, Mail, Phone, MapPin, ClipboardList, MessageSquare, FileText, Upload, Globe, ExternalLink } from "lucide-react";
+import { LoggedInUser } from "@/components/auth/logged-in-user";
+import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
+import type { ContentBlock } from "@/lib/multimodal-utils";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
   PieChart,
@@ -44,6 +44,7 @@ type TicketRow = {
   status?: string;
   messages?: { from: string; text: string; createdAt?: string }[];
   docRequests?: { type: string; requestedAt?: string; fulfilledAt?: string | null }[];
+  attachments?: ContentBlock[];
   closedAt?: string | null;
   appointment?: { scheduledAt: string; type: string };
   createdAt: string;
@@ -58,6 +59,15 @@ type VetUser = {
   specialization: string;
 };
 
+type RAGDocument = {
+  id: string;
+  name: string;
+  url: string;
+  bytes: number;
+  createdAt: string | null;
+  format: string;
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -69,9 +79,17 @@ export default function AdminPage() {
   const [selectedVetId, setSelectedVetId] = useState<string>("");
   const [actionLoading, setActionLoading] = useState(false);
 
+  const ragUploadInputRef = useRef<HTMLInputElement>(null);
+  const [documents, setDocuments] = useState<RAGDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
+  const [ragUrl, setRagUrl] = useState("");
+  const [addingUrl, setAddingUrl] = useState(false);
+
   useEffect(() => {
     loadTickets();
     loadVets();
+    fetchDocuments();
   }, []);
 
   async function loadTickets() {
@@ -101,6 +119,95 @@ export default function AdminPage() {
       setVets([]);
     }
   }
+
+  async function fetchDocuments() {
+    setDocumentsLoading(true);
+    try {
+      const res = await fetch("/api/rag/documents");
+      if (!res.ok) {
+        setDocuments([]);
+        return;
+      }
+      const data = (await res.json()) as { documents?: RAGDocument[] };
+      setDocuments(Array.isArray(data.documents) ? data.documents : []);
+    } catch {
+      setDocuments([]);
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }
+
+  const handleUploadClick = () => {
+    ragUploadInputRef.current?.click();
+  };
+
+  const handleAddUrlToRag = async () => {
+    const url = ragUrl.trim();
+    if (!url) {
+      toast.error("Please enter a URL.");
+      return;
+    }
+    setAddingUrl(true);
+    try {
+      const res = await fetch("/api/rag/add-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((data as { error?: string }).error || "Failed to add URL to knowledge base.");
+      } else {
+        const chunks = typeof (data as { chunksAdded?: number }).chunksAdded === "number"
+          ? (data as { chunksAdded: number }).chunksAdded
+          : undefined;
+        toast.success(
+          chunks != null
+            ? `Website added — ${chunks} chunk${chunks === 1 ? "" : "s"} indexed.`
+            : "Website added to knowledge base.",
+        );
+        setRagUrl("");
+        await fetchDocuments();
+      }
+    } catch {
+      toast.error("Failed to add URL to knowledge base.");
+    } finally {
+      setAddingUrl(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    const nonPdf = files.filter((file) => file.type !== "application/pdf");
+    if (nonPdf.length > 0) {
+      toast.error("Only PDF files are supported for the knowledge base.");
+      e.target.value = "";
+      return;
+    }
+
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    setUploadingDocuments(true);
+    try {
+      const res = await fetch("/api/rag/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error((payload as { error?: string }).error || "Failed to upload documents.");
+      } else {
+        toast.success(`Added ${files.length} PDF${files.length > 1 ? "s" : ""} to knowledge base.`);
+        await fetchDocuments();
+      }
+    } catch {
+      toast.error("Failed to upload documents.");
+    } finally {
+      setUploadingDocuments(false);
+      e.target.value = "";
+    }
+  };
 
   function openAssignDialog(ticket: TicketRow) {
     setSelectedTicket(ticket);
@@ -187,18 +294,6 @@ export default function AdminPage() {
     });
 
   // Chart data: vet load (open tickets per vet)
-  const vetLoadChartData = vets.map((v) => ({
-    name: (v.name || v.username).length > 12 ? (v.name || v.username).slice(0, 11) + "…" : v.name || v.username,
-    fullName: v.name || v.username,
-    open: openTicketCount(v.id),
-  })).filter((d) => d.open > 0).sort((a, b) => b.open - a.open);
-  // If no vet has load, show all vets with 0
-  const vetLoadDisplay = vetLoadChartData.length > 0 ? vetLoadChartData : vets.map((v) => ({
-    name: (v.name || v.username).length > 12 ? (v.name || v.username).slice(0, 11) + "…" : v.name || v.username,
-    fullName: v.name || v.username,
-    open: 0,
-  }));
-
   const STATUS_COLORS = { Unassigned: "#94a3b8", "Assigned (open)": "#3b82f6", Closed: "#22c55e" };
   const statusPieData = [
     { name: "Unassigned", value: unassigned.filter((t) => (t.status ?? "open").toLowerCase() !== "closed").length, color: STATUS_COLORS.Unassigned },
@@ -206,7 +301,10 @@ export default function AdminPage() {
     { name: "Closed", value: closedTickets.length, color: STATUS_COLORS.Closed },
   ].filter((d) => d.value > 0);
 
-  const chartHeight = 130;
+  const pdfDocs = documents.filter((d) => (d.format ?? "").toLowerCase() !== "url");
+  const urlDocs = documents.filter(
+    (d) => (d.format ?? "").toLowerCase() === "url" || d.id.startsWith("url:"),
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
@@ -219,10 +317,13 @@ export default function AdminPage() {
               Triage cases, assign to vets by workload, or close when needed.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={handleLogout} className="shrink-0">
-            <LogOut className="size-4 mr-2" />
-            Log out
-          </Button>
+          <div className="flex items-center gap-3">
+            <LoggedInUser compact className="hidden sm:block" />
+            <Button variant="outline" size="sm" onClick={handleLogout} className="shrink-0">
+              <LogOut className="size-4 mr-2" />
+              Log out
+            </Button>
+          </div>
         </div>
 
         {/* Top bar: Unassigned, Assigned, Open, Closed */}
@@ -249,13 +350,199 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Two columns: left = charts (small), right = tables */}
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
-          {/* Left column: charts only */}
-          <div className="space-y-4 order-2 lg:order-1">
+        {/* Two columns: left = controls/charts, right = tables */}
+        <div className="grid grid-cols-1 lg:grid-cols-[560px_1fr] gap-6 items-start">
+          {/* Left column: 2-column grid */}
+          <div className="order-2 lg:order-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Knowledge base (admin) */}
+            <Card className="bg-card/80 shadow-sm overflow-hidden sm:col-span-2">
+              <CardHeader className="py-2 px-4">
+                <CardTitle className="text-sm flex items-center gap-1.5">
+                  <Globe className="size-3.5 text-muted-foreground" />
+                  Knowledge base
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 pt-0 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-border/70 bg-muted/10 p-3 flex flex-col min-h-[108px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-foreground">Add PDFs</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Upload reference documents for RAG.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleUploadClick}
+                        size="sm"
+                        variant="outline"
+                        className="h-9 shrink-0"
+                        disabled={uploadingDocuments}
+                      >
+                        <Upload className="size-3.5 mr-1.5" />
+                        {uploadingDocuments ? "Adding…" : "Upload"}
+                      </Button>
+                    </div>
+                    <div className="mt-auto" />
+                    <input
+                      ref={ragUploadInputRef}
+                      type="file"
+                      onChange={handleFileChange}
+                      multiple
+                      accept="application/pdf"
+                      className="hidden"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-muted/10 p-3 flex flex-col min-h-[108px]">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-foreground">Add website URL</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Index a webpage into the knowledge base.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 shrink-0"
+                        onClick={handleAddUrlToRag}
+                        disabled={addingUrl || !ragUrl.trim()}
+                      >
+                        {addingUrl ? "Adding…" : "Add"}
+                      </Button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <Input
+                        type="url"
+                        placeholder="https://example.com/article"
+                        value={ragUrl}
+                        onChange={(e) => setRagUrl(e.target.value)}
+                        className="h-9 text-xs"
+                        disabled={addingUrl}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (!addingUrl && ragUrl.trim()) {
+                              void handleAddUrlToRag();
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border/70 bg-muted/10 p-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Sources
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={fetchDocuments}
+                      disabled={documentsLoading}
+                    >
+                      {documentsLoading ? "Refreshing…" : "Refresh"}
+                    </Button>
+                  </div>
+
+                  {documentsLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading…</p>
+                  ) : documents.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No PDFs/URLs added yet.</p>
+                  ) : (
+                    <Tabs defaultValue="pdfs" className="w-full">
+                      <TabsList className="grid w-full grid-cols-2 h-9">
+                        <TabsTrigger value="pdfs" className="text-xs gap-1.5">
+                          PDFs
+                          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500/20 px-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                            {pdfDocs.length}
+                          </span>
+                        </TabsTrigger>
+                        <TabsTrigger value="urls" className="text-xs gap-1.5">
+                          URLs
+                          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700 dark:text-blue-400 tabular-nums">
+                            {urlDocs.length}
+                          </span>
+                        </TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="pdfs" className="mt-3 space-y-2">
+                        {pdfDocs.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No PDFs uploaded yet.</p>
+                        ) : (
+                          <>
+                            {pdfDocs.slice(0, 5).map((d) => (
+                              <div key={d.id} className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-foreground break-words">{d.name}</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    PDF · {(d.bytes / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                </div>
+                                <a
+                                  href={d.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  Open
+                                </a>
+                              </div>
+                            ))}
+                            {pdfDocs.length > 5 && (
+                              <p className="text-[11px] text-muted-foreground">
+                                Showing 5 of {pdfDocs.length}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </TabsContent>
+
+                      <TabsContent value="urls" className="mt-3 space-y-2">
+                        {urlDocs.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No URLs added yet.</p>
+                        ) : (
+                          <>
+                            {urlDocs.slice(0, 5).map((d) => (
+                              <div key={d.id} className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-foreground break-words">{d.name}</p>
+                                  <p className="text-[11px] text-muted-foreground">URL</p>
+                                </div>
+                                <a
+                                  href={d.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  Open
+                                </a>
+                              </div>
+                            ))}
+                            {urlDocs.length > 5 && (
+                              <p className="text-[11px] text-muted-foreground">
+                                Showing 5 of {urlDocs.length}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </TabsContent>
+                    </Tabs>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Vets */}
             {!loading && (
-              <Card className="bg-card shadow-sm">
+              <Card className="bg-card/80 shadow-sm">
                 <CardHeader className="py-2 px-4">
                   <CardTitle className="text-sm flex items-center gap-1.5">
                     <Users className="size-3.5 text-muted-foreground" />
@@ -282,37 +569,9 @@ export default function AdminPage() {
               </Card>
             )}
 
-            {/* Vet load bar chart */}
-            {!loading && (
-              <Card className="bg-card shadow-sm">
-                <CardHeader className="py-2 px-4">
-                  <CardTitle className="text-sm flex items-center gap-1.5">
-                    <Stethoscope className="size-3.5 text-muted-foreground" />
-                    Vet load
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 pt-0">
-                  {vetLoadDisplay.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-4 text-center">No vets / no load</p>
-                  ) : (
-                    <div className="w-full" style={{ height: chartHeight }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={vetLoadDisplay} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
-                          <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
-                          <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 10 }} />
-                          <Tooltip formatter={(value: number) => [value, "Open"]} labelFormatter={(_, payload) => payload[0]?.payload?.fullName ?? ""} />
-                          <Bar dataKey="open" fill="var(--primary)" radius={[0, 2, 2, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {/* Ticket status pie */}
             {!loading && (
-              <Card className="bg-card shadow-sm overflow-visible">
+              <Card className="bg-card/80 shadow-sm overflow-visible">
                 <CardHeader className="py-2 px-4">
                   <CardTitle className="text-sm flex items-center gap-1.5">
                     <PieChartIcon className="size-3.5 text-muted-foreground" />
@@ -323,7 +582,7 @@ export default function AdminPage() {
                   {statusPieData.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-4 text-center">No tickets</p>
                   ) : (
-                    <div className="w-full overflow-visible" style={{ height: chartHeight }}>
+                    <div className="w-full overflow-visible" style={{ height: 170 }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                           <Pie
@@ -693,6 +952,22 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </section>
+
+                    {Array.isArray(t.attachments) && t.attachments.length > 0 && (
+                      <section className="space-y-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <FileText className="size-4" />
+                          <h3 className="text-xs font-semibold uppercase tracking-wider">Images</h3>
+                        </div>
+                        <div className="rounded-xl border bg-muted/15 p-4">
+                          <div className="flex flex-wrap gap-2">
+                            {t.attachments.map((b, idx) => (
+                              <MultimodalPreview key={idx} block={b} size="md" />
+                            ))}
+                          </div>
+                        </div>
+                      </section>
+                    )}
 
                     {Array.isArray(t.messages) && t.messages.length > 0 && (
                       <section className="space-y-2">

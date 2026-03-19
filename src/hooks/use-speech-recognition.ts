@@ -80,6 +80,19 @@ export function useSpeechRecognition(
 
   // Check browser support
   useEffect(() => {
+    const secureContext = typeof window !== "undefined" ? window.isSecureContext : false;
+    const hostname =
+      typeof window !== "undefined" ? window.location.hostname : "unknown";
+    const isLocalhostLike = hostname === "localhost" || hostname === "127.0.0.1";
+
+    if (!secureContext && !isLocalhostLike) {
+      setIsSupported(false);
+      setError(
+        "Speech recognition requires a secure context (https). Your site is currently running over http, so STT may not work. You can use typing instead."
+      );
+      return;
+    }
+
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
     setIsSupported(!!SpeechRecognition);
@@ -138,8 +151,18 @@ export function useSpeechRecognition(
             errorMessage = "Microphone permission denied. Please allow microphone access.";
             break;
           case "network":
-            errorMessage =
-              "Speech recognition uses an online service and couldn’t connect. Check your internet, try again, or type your message instead.";
+            {
+              const online = typeof navigator !== "undefined" ? navigator.onLine : true;
+              const secure = typeof window !== "undefined" ? window.isSecureContext : false;
+              const onlinePart = online
+                ? "Your device looks online, but the speech service couldn’t be reached."
+                : "Your device appears offline (navigator.onLine=false).";
+              const securePart = secure
+                ? ""
+                : " Note: speech recognition often requires a secure context (https or localhost).";
+              errorMessage =
+                `${onlinePart} Check VPN/proxy/ad-block/firewall settings and try again.${securePart} You can also type your message instead.`;
+            }
             break;
           case "aborted":
             // User or system aborted, don't show error

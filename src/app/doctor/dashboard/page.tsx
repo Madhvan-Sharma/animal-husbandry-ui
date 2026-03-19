@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { LogOut, Eye, MessageSquare, FileText, CalendarCheck, Stethoscope, User, ClipboardList, Mail, Phone, MapPin, Pill, XCircle, Plus, Trash2, SendHorizontal, Star } from "lucide-react";
+import { LogOut, Eye, MessageSquare, FileText, CalendarCheck, Stethoscope, User, ClipboardList, Mail, Phone, MapPin, Pill, XCircle, Plus, Trash2, SendHorizontal, Star, Ambulance, Cross, Beef } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -34,6 +34,9 @@ import { parseAiDiagnosis, getDiagnosisFieldLabel, getDoctorPrefillFromDiagnosis
 import { toast } from "sonner";
 import { getApiKey } from "@/lib/api-key";
 import { extractLangflowMessageText } from "@/lib/langflow-utils";
+import { LoggedInUser } from "@/components/auth/logged-in-user";
+import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
+import type { ContentBlock } from "@/lib/multimodal-utils";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "#dc2626",
@@ -73,6 +76,7 @@ type Ticket = {
   status?: string;
   messages?: { from: string; text: string; createdAt: string }[];
   docRequests?: { type: string; requestedAt: string; fulfilledAt?: string | null }[];
+  attachments?: ContentBlock[];
   nextSteps?: string;
   closedAt?: string | null;
   appointment?: { scheduledAt: string; type: string };
@@ -357,6 +361,45 @@ export default function VetDashboardPage() {
     }
   }
 
+  async function handleDispatch(kind: "ambulance" | "vet_team" | "ai_team") {
+    if (!selected) return;
+    const labels: Record<typeof kind, string> = {
+      ambulance: "Ambulance dispatched",
+      vet_team: "Vet team dispatched",
+      ai_team: "Artificial insemination team dispatched",
+    };
+    const bodyText: Record<typeof kind, string> = {
+      ambulance:
+        "Dispatch update: Ambulance has been dispatched to your location. Please keep the animal stable and share your exact location/landmark if needed.",
+      vet_team:
+        "Dispatch update: A vet team has been dispatched. Please be available on call and share any additional symptoms or recent changes.",
+      ai_team:
+        "Dispatch update: An Artificial Insemination (AI) team has been dispatched. Please confirm preferred timing and availability on-site.",
+    };
+    if (!confirm(`${labels[kind]}? This will notify the user.`)) return;
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/tickets/${selected._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addMessage: bodyText[kind] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSelected(data);
+        const list = await fetch("/api/tickets?forVet=1").then((r) => r.json());
+        if (Array.isArray(list)) setTickets(list);
+        toast.success(labels[kind]);
+      } else {
+        toast.error(data.error ?? "Failed to dispatch");
+      }
+    } catch {
+      toast.error("Failed to dispatch");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   function buildMedicineMessage(): string {
     return medicineRows
       .filter((r) => r.medicine.trim())
@@ -563,6 +606,7 @@ export default function VetDashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <LoggedInUser compact className="hidden sm:block" />
             <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2">
               <LogOut className="size-4" />
               Log out
@@ -1076,6 +1120,23 @@ export default function VetDashboardPage() {
                   </div>
                 </section>
 
+                {/* Images */}
+                {Array.isArray(selected.attachments) && selected.attachments.length > 0 && (
+                  <section className="space-y-3">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <FileText className="size-4" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider">Images</h3>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/15 p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {selected.attachments.map((b, idx) => (
+                          <MultimodalPreview key={idx} block={b} size="lg" />
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
                 {/* Messages */}
                 {Array.isArray(selected.messages) && selected.messages.length > 0 && (
                   <section className="space-y-3">
@@ -1137,6 +1198,43 @@ export default function VetDashboardPage() {
                         <p className="text-sm text-muted-foreground">This consultation will be assigned by an admin. Once assigned to you, you can reply, request documents, recommend medicine, or schedule appointments.</p>
                       ) : (
                         <>
+                          <div className="space-y-2 pb-4">
+                            <Label className="text-xs text-muted-foreground">
+                              Dispatch teams
+                            </Label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={actionLoading}
+                                onClick={() => handleDispatch("ambulance")}
+                                className="h-auto min-h-10 justify-start gap-2 rounded-lg bg-red-600 text-white hover:bg-red-700 px-3 py-2 text-xs leading-tight whitespace-normal"
+                              >
+                                <Ambulance className="size-4 shrink-0" />
+                                <span className="min-w-0 break-words">Send ambulance</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={actionLoading}
+                                onClick={() => handleDispatch("vet_team")}
+                                className="h-auto min-h-10 justify-start gap-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 text-xs leading-tight whitespace-normal"
+                              >
+                                <Cross className="size-4 shrink-0" />
+                                <span className="min-w-0 break-words">Send vet team</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={actionLoading}
+                                onClick={() => handleDispatch("ai_team")}
+                                className="h-auto min-h-10 justify-start gap-2 rounded-lg bg-fuchsia-600 text-white hover:bg-fuchsia-700 px-3 py-2 text-xs leading-tight whitespace-normal"
+                              >
+                                <Beef className="size-4 shrink-0" />
+                                <span className="min-w-0 break-words">Send Artificial Insemination team</span>
+                              </Button>
+                            </div>
+                          </div>
                           <div className="space-y-2 pb-4">
                             <div className="flex items-center justify-between gap-2">
                               <Label className="text-xs text-muted-foreground">Reply to patient</Label>

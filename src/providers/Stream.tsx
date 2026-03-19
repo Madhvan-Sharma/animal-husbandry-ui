@@ -44,6 +44,7 @@ interface StreamContextType {
   error: Error | null;
   submit: (input: string, contentBlocks?: ContentBlock[], sessionId?: string) => Promise<void>;
   stop: () => void;
+  newChat: () => Promise<void>;
   /** Always set when the session starts (new UUID per session). Use as chat/diagnosis session identifier. */
   sessionId: string;
   setSessionId: (id: string | null) => void;
@@ -135,6 +136,11 @@ const StreamSession = ({
   const submit = useCallback(
     async (input: string, contentBlocks: ContentBlock[] = [], _currentSessionId?: string) => {
       if (isLoading) return;
+      // Safety: ensure we never have two in-flight streams.
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
 
       let humanMessageContent: string | (string | ContentBlock)[];
       if (contentBlocks.length > 0) {
@@ -187,14 +193,19 @@ const StreamSession = ({
         }
 
         const backendApiBase = getBackendApiBase();
-        const endpoint = `${backendApiBase}/api/v1/chat/stream`;
+        const streamEndpoint = `${backendApiBase}/api/v1/chat/stream`;
+        const nonStreamEndpoint = `${backendApiBase}/api/v1/chat`;
+        const requestId = crypto.randomUUID();
 
         const aiMessageId = crypto.randomUUID();
+        const hasImage = contentBlocks.some((b) => b.type === "image");
         setMessages((prev) => [
           ...prev,
           {
             id: aiMessageId,
             type: "ai",
+            // Keep content empty so the UI shows the animated "Preparing response..." loader
+            // even for image requests.
             content: "",
           },
         ]);
@@ -235,53 +246,98 @@ const StreamSession = ({
           formData.append("image", blob, filename);
         }
 
-        let fullAnswer = "";
+        let finalAnswer = "";
 
-        await fetchEventSource(endpoint, {
-          method: "POST",
-          headers: {
-            ...(apiKey && { "x-api-key": apiKey }),
-          },
-          body: formData,
-          signal: abortController.signal,
-          onmessage(ev) {
-            const raw = ev.data;
-            const marker = raw.trim();
-            if (marker === "[DONE]") {
-              // fetchEventSource will close after this handler returns
-              return;
-            }
-            if (marker.startsWith("[ERROR]")) {
-              const msg = marker.replace(/^\[ERROR\]\s*/, "");
-              throw new Error(msg || "Streaming error from backend");
-            }
+        // Image requests are not truly streamed token-by-token; using SSE here causes
+        // retries/disconnect edge cases (buffering/heartbeat) and can re-run CNN/GPT.
+        // So: use non-streaming endpoint for images; keep SSE streaming for text-only.
+        if (firstImage) {
+          const res = await fetch(nonStreamEndpoint, {
+            method: "POST",
+            headers: {
+              ...(apiKey && { "x-api-key": apiKey }),
+              "x-request-id": requestId,
+            },
+            body: formData,
+            signal: abortController.signal,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || `Backend error (${res.status})`);
+          }
+          const data = (await res.json()) as { answer?: unknown };
+          finalAnswer =
+            (typeof data?.answer === "string" ? data.answer : "").trim() ||
+            "No response received.";
+        } else {
+          let fullAnswer = "";
+          let firstTokenSeen = false;
 
-            // Backend sends JSON events: {"token":"..."} (newline-safe). Fall back to raw text.
-            let token = raw;
-            try {
-              const parsed = JSON.parse(raw) as { token?: unknown };
-              if (typeof parsed?.token === "string") {
-                token = parsed.token;
+          let doneReceived = false;
+          await fetchEventSource(streamEndpoint, {
+            method: "POST",
+            headers: {
+              ...(apiKey && { "x-api-key": apiKey }),
+              "x-request-id": requestId,
+            },
+            body: formData,
+            signal: abortController.signal,
+            heartbeatTimeout: 120_000,
+            async onopen(response) {
+              if (!response.ok) {
+                const text = await response.text().catch(() => "");
+                throw new Error(text || `Backend error (${response.status})`);
               }
-            } catch {
-              // ignore
-            }
+            },
+            onmessage(ev) {
+              if (ev.event === "ping") return;
 
-            // Preserve spaces exactly as streamed
-            fullAnswer += token;
-            const current = fullAnswer;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === aiMessageId ? { ...m, content: current } : m
-              )
-            );
-          },
-          onerror(err) {
-            throw err;
-          },
-        });
+              const raw = ev.data;
+              const marker = raw.trim();
+              if (marker === "[DONE]") {
+                doneReceived = true;
+                return;
+              }
+              if (marker.startsWith("[ERROR]")) {
+                const msg = marker.replace(/^\[ERROR\]\s*/, "");
+                throw new Error(msg || "Streaming error from backend");
+              }
 
-        const finalAnswer = fullAnswer.trim() || "No response received.";
+              let token = raw;
+              try {
+                const parsed = JSON.parse(raw) as { token?: unknown };
+                if (typeof parsed?.token === "string") {
+                  token = parsed.token;
+                }
+              } catch {
+                // ignore
+              }
+
+              if (!firstTokenSeen) {
+                firstTokenSeen = true;
+                fullAnswer = "";
+              }
+              fullAnswer += token;
+              const current = fullAnswer;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMessageId ? { ...m, content: current } : m
+                )
+              );
+            },
+            onclose() {
+              if (abortController.signal.aborted) return;
+              if (!doneReceived) {
+                throw new Error("Connection closed before completion");
+              }
+            },
+            onerror(err) {
+              throw err;
+            },
+          });
+
+          finalAnswer = fullAnswer.trim() || "No response received.";
+        }
 
         setMessages((prev) =>
           prev.map((m) =>
@@ -333,6 +389,34 @@ const StreamSession = ({
     }
   }, []);
 
+  const newChat = useCallback(async () => {
+    // Stop any in-flight streaming request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    setError(null);
+    setIsTerminal(false);
+    setMessages([]);
+
+    // Reset any workflow selection state for a clean chat
+    setGraphId(null);
+    setGraphName(null);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem("selectedGraphId");
+      window.sessionStorage.removeItem("initialQuestion");
+    }
+
+    // Create a new session id and persist it
+    const res = await fetch("/api/sessions", { method: "POST" });
+    if (!res.ok) {
+      throw new Error("Failed to create chat session");
+    }
+    const data = (await res.json()) as { sessionId?: string };
+    setSessionId(data.sessionId ?? null);
+  }, [setGraphId, setGraphName, setSessionId]);
+
   return (
     <StreamContext.Provider
       value={{
@@ -341,6 +425,7 @@ const StreamSession = ({
         error,
         submit,
         stop,
+        newChat,
         sessionId: sessionId ?? "",
         setSessionId,
         graphId,

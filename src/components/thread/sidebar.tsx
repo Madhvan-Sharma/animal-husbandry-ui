@@ -2,20 +2,14 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Upload,
-  FileText,
-  ExternalLink,
   PanelRightOpen,
   PanelRightClose,
   TicketPlus,
   Pill,
   CalendarCheck,
   Stethoscope,
-  FolderOpen,
-  Tractor,
-  Globe,
-  Plus,
   Maximize2,
+  FileText,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
@@ -24,17 +18,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useCreateTicket } from "./CreateTicketContext";
 import { getUserId } from "@/lib/user-id";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import { VetAILogoSVG } from "../icons/medcare";
-import { Input } from "@/components/ui/input";
 import { TicketVetActionsModal } from "./TicketVetActionsModal";
+import type { ContentBlock } from "@/lib/multimodal-utils";
 
 interface Ticket {
   _id: string;
@@ -56,6 +48,7 @@ interface Ticket {
   status?: string;
   messages?: { from: string; text: string; createdAt: string }[];
   docRequests?: { type: string; requestedAt?: string; fulfilledAt?: string | null }[];
+  attachments?: ContentBlock[];
   appointment?: { scheduledAt: string; type: string };
   nextSteps?: string;
   closedAt?: string | null;
@@ -70,21 +63,6 @@ export default function Sidebar() {
   );
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(false);
-  const ragUploadInputRef = useRef<HTMLInputElement>(null);
-  const [documents, setDocuments] = useState<
-    {
-      id: string;
-      name: string;
-      url: string;
-      bytes: number;
-      createdAt: string | null;
-      format: string;
-    }[]
-  >([]);
-  const [documentsLoading, setDocumentsLoading] = useState(false);
-  const [uploadingDocuments, setUploadingDocuments] = useState(false);
-  const [ragUrl, setRagUrl] = useState("");
-  const [addingUrl, setAddingUrl] = useState(false);
   const [ticketForActionsModal, setTicketForActionsModal] = useState<Ticket | null>(null);
   const { openCreateTicket, registerOnTicketCreated } = useCreateTicket();
 
@@ -105,32 +83,6 @@ export default function Sidebar() {
     }
   }, []);
 
-  const fetchDocuments = useCallback(async () => {
-    setDocumentsLoading(true);
-    try {
-      const res = await fetch("/api/rag/documents");
-      if (!res.ok) {
-        setDocuments([]);
-        return;
-      }
-      const data = (await res.json()) as {
-        documents?: {
-          id: string;
-          name: string;
-          url: string;
-          bytes: number;
-          createdAt: string | null;
-          format: string;
-        }[];
-      };
-      setDocuments(Array.isArray(data.documents) ? data.documents : []);
-    } catch {
-      setDocuments([]);
-    } finally {
-      setDocumentsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     registerOnTicketCreated(fetchTickets);
   }, [registerOnTicketCreated, fetchTickets]);
@@ -139,93 +91,6 @@ export default function Sidebar() {
     if (typeof window === "undefined") return;
     fetchTickets();
   }, [fetchTickets]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    fetchDocuments();
-  }, [fetchDocuments]);
-
-  const handleUploadClick = () => {
-    ragUploadInputRef.current?.click();
-  };
-
-  const handleAddUrlToRag = async () => {
-    const url = ragUrl.trim();
-    if (!url) {
-      toast.error("Please enter a URL.");
-      return;
-    }
-    setAddingUrl(true);
-    try {
-      const res = await fetch("/api/rag/add-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.error || "Failed to add URL to knowledge base.");
-      } else {
-        const chunks = typeof data.chunksAdded === "number" ? data.chunksAdded : undefined;
-        toast.success(
-          chunks != null
-            ? `Website added — ${chunks} chunk${chunks === 1 ? "" : "s"} indexed.`
-            : "Website added to knowledge base.",
-        );
-        setRagUrl("");
-        // Optimistically add to local documents list so it is visible immediately.
-        setDocuments((prev) => [
-          {
-            id: `url:${Date.now()}`,
-            name: url,
-            url,
-            bytes: 0,
-            createdAt: new Date().toISOString(),
-            format: "url",
-          },
-          ...prev,
-        ]);
-        await fetchDocuments();
-      }
-    } catch {
-      toast.error("Failed to add URL to knowledge base.");
-    } finally {
-      setAddingUrl(false);
-    }
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
-    if (files.length === 0) return;
-    const nonPdf = files.filter((file) => file.type !== "application/pdf");
-    if (nonPdf.length > 0) {
-      toast.error("Only PDF files are supported for the knowledge base.");
-      e.target.value = "";
-      return;
-    }
-
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-    setUploadingDocuments(true);
-    try {
-      const res = await fetch("/api/rag/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(payload.error || "Failed to upload documents.");
-      } else {
-        toast.success(`Added ${files.length} PDF${files.length > 1 ? "s" : ""} to knowledge base.`);
-        await fetchDocuments();
-      }
-    } catch {
-      toast.error("Failed to upload documents.");
-    } finally {
-      setUploadingDocuments(false);
-      e.target.value = "";
-    }
-  };
 
   const SEVERITY_COLORS: Record<string, string> = {
     critical: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
@@ -255,123 +120,21 @@ export default function Sidebar() {
           <TicketPlus className="mr-2 h-4 w-4" />
           Create Ticket
         </Button>
-        <Button
-          onClick={handleUploadClick}
-          className="w-full border-border font-medium"
-          variant="outline"
-          disabled={uploadingDocuments}
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          {uploadingDocuments ? "Adding PDFs…" : "Add PDFs to Knowledge base"}
-        </Button>
-        <input
-          ref={ragUploadInputRef}
-          type="file"
-          onChange={handleFileChange}
-          multiple
-          accept="application/pdf"
-          className="hidden"
-        />
-        <div className="rounded-xl border border-border/80 bg-gradient-to-b from-muted/30 to-muted/10 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-3.5 pt-3.5 pb-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Globe className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                Add website to knowledge base
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Paste a URL to index its content
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2.5 px-3.5 pb-3.5">
-            <Input
-              type="url"
-              placeholder="https://example.com/article"
-              value={ragUrl}
-              onChange={(e) => setRagUrl(e.target.value)}
-              className="h-9 text-xs rounded-lg border-border bg-background/80 placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-primary/20"
-              disabled={addingUrl}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (!addingUrl && ragUrl.trim()) {
-                    void handleAddUrlToRag();
-                  }
-                }
-              }}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="w-full h-9 text-xs font-medium rounded-lg gap-1.5 bg-primary/10 text-primary hover:bg-primary/15 border border-primary/20"
-              onClick={handleAddUrlToRag}
-              disabled={addingUrl || !ragUrl.trim()}
-            >
-              {addingUrl ? (
-                <>
-                  <span className="size-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  Adding…
-                </>
-              ) : (
-                <>
-                  <Plus className="h-3.5 w-3.5" />
-                  Add to knowledge base
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
       </div>
 
-      <Tabs defaultValue="tickets" className="glass-panel w-full rounded-2xl p-3">
-        <TabsList className="w-full grid grid-cols-3 h-10">
-          <TabsTrigger value="tickets" className="gap-1.5 text-xs font-semibold uppercase tracking-wide">
+      <div className="w-full space-y-3">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <Stethoscope className="h-3.5 w-3.5" />
             Tickets
-            {!ticketsLoading && tickets.length > 0 && (
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/20 px-1 text-[10px] font-bold text-primary tabular-nums">
-                {tickets.length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="documents" className="gap-1.5 text-xs font-semibold uppercase tracking-wide">
-            <FolderOpen className="h-3.5 w-3.5" />
-            Documents
-            {!documentsLoading &&
-              documents.filter((d) => d.format.toLowerCase() !== "url").length > 0 && (
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500/20 px-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
-                {documents.filter((d) => d.format.toLowerCase() !== "url").length}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="urls" className="gap-1.5 text-xs font-semibold uppercase tracking-wide">
-            <FolderOpen className="h-3.5 w-3.5" />
-            URLs
-            {!documentsLoading &&
-              documents.filter(
-                (d) =>
-                  d.format.toLowerCase() === "url" ||
-                  d.id.startsWith("url:"),
-              ).length > 0 && (
-                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700 dark:text-blue-400 tabular-nums">
-                  {
-                    documents.filter(
-                      (d) =>
-                        d.format.toLowerCase() === "url" ||
-                        d.id.startsWith("url:"),
-                    ).length
-                  }
-                </span>
-              )}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="tickets" className="mt-3 min-h-0">
-          <div className="flex flex-col gap-3">
+          </div>
+          {!ticketsLoading && tickets.length > 0 && (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-[10px] font-bold text-primary tabular-nums">
+              {tickets.length}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col gap-3">
           {ticketsLoading ? (
             Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={i} className="h-28 w-full rounded-xl bg-muted" />
@@ -511,122 +274,8 @@ export default function Sidebar() {
               );
             })
           )}
-          </div>
-        </TabsContent>
-        <TabsContent value="documents" className="mt-3 min-h-0">
-          <div className="flex flex-col gap-2.5">
-            {documentsLoading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-18 w-full rounded-lg bg-muted" />
-              ))
-            ) : documents.filter((d) => d.format.toLowerCase() !== "url").length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-muted/20 py-8 px-4 text-center">
-                <Tractor className="mx-auto h-7 w-7 text-muted-foreground/50 mb-2" />
-                <p className="text-sm text-muted-foreground">No PDFs in knowledge base yet</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Add a PDF above to include it in the knowledge base
-                </p>
-              </div>
-            ) : (
-              documents
-                .filter((doc) => doc.format.toLowerCase() !== "url")
-                .map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="glass-panel flex flex-col gap-2 rounded-lg p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground break-words">
-                          {doc.name}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {doc.createdAt
-                            ? new Date(doc.createdAt).toLocaleString(undefined, {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              })
-                            : "Uploaded recently"}
-                        </p>
-                      </div>
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Open
-                      </a>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {(doc.bytes / 1024 / 1024).toFixed(2)} MB · {doc.format.toUpperCase()}
-                    </div>
-                  </div>
-                ))
-            )}
-          </div>
-        </TabsContent>
-        <TabsContent value="urls" className="mt-3 min-h-0">
-          <div className="flex flex-col gap-2.5">
-            {documentsLoading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-18 w-full rounded-lg bg-muted" />
-              ))
-            ) : documents.filter(
-                (d) =>
-                  d.format.toLowerCase() === "url" ||
-                  d.id.startsWith("url:"),
-              ).length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-muted/20 py-8 px-4 text-center">
-                <Tractor className="mx-auto h-7 w-7 text-muted-foreground/50 mb-2" />
-                <p className="text-sm text-muted-foreground">No URLs added yet</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Paste a website URL above to add it to the knowledge base
-                </p>
-              </div>
-            ) : (
-              documents
-                .filter(
-                  (doc) =>
-                    doc.format.toLowerCase() === "url" ||
-                    doc.id.startsWith("url:"),
-                )
-                .map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="glass-panel flex flex-col gap-2 rounded-lg p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground break-words">
-                          {doc.name}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {doc.createdAt
-                            ? new Date(doc.createdAt).toLocaleString(undefined, {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              })
-                            : "Added recently"}
-                        </p>
-                      </div>
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Open
-                      </a>
-                    </div>
-                  </div>
-                ))
-            )}
-          </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
   );
 

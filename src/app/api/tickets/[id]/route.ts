@@ -4,6 +4,48 @@ import { getSessionFromRequest } from "@/lib/auth-server";
 import { scheduleAppointmentEmail, scheduleFollowUpEmail } from "@/lib/scheduler";
 import { ObjectId } from "mongodb";
 
+type ImageAttachment = {
+  type: "image";
+  mimeType: string;
+  data: string; // base64
+  metadata?: { name?: string; filename?: string };
+};
+
+function sanitizeImageAttachments(input: unknown): ImageAttachment[] {
+  if (!Array.isArray(input)) return [];
+  const out: ImageAttachment[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const type = (item as { type?: unknown }).type;
+    const mimeType = (item as { mimeType?: unknown }).mimeType;
+    const data = (item as { data?: unknown }).data;
+    if (type !== "image") continue;
+    if (typeof mimeType !== "string" || !mimeType.startsWith("image/")) continue;
+    if (typeof data !== "string" || data.length < 8) continue;
+    if (data.length > 3_000_000) continue;
+    const metadata = (item as { metadata?: unknown }).metadata;
+    const name =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { name?: unknown }).name
+        : undefined;
+    const filename =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { filename?: unknown }).filename
+        : undefined;
+    out.push({
+      type: "image",
+      mimeType,
+      data,
+      metadata: {
+        ...(typeof name === "string" ? { name: name.slice(0, 200) } : {}),
+        ...(typeof filename === "string" ? { filename: filename.slice(0, 200) } : {}),
+      },
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 /**
  * Parse FOLLOW_UP_EMAIL_SCHEDULED_AT: relative ("7 days", "5 mins", "1 hour") or absolute ISO.
  * Returns scheduled Date from baseDate for relative, or the parsed date for absolute.
@@ -80,7 +122,7 @@ export async function PATCH(
     const session = await getSessionFromRequest();
     const isAdmin = session?.role === "admin";
     const isVetOrDoctor = session?.role === "vet" || session?.role === "doctor";
-    if (!session || (!isAdmin && !isVetOrDoctor)) {
+    if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -112,12 +154,31 @@ export async function PATCH(
     const notifCol = db.collection("notifications");
     const patientId = String(ticket.userId);
     const isAssignedToMe = String(ticket.assignedDoctorId ?? "") === session.userId;
+    const isOwner = patientId === session.userId;
+
+    // User can add images to their own ticket
+    if (body.addImages !== undefined) {
+      if (!isOwner) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const incoming = sanitizeImageAttachments(body.addImages);
+      if (incoming.length === 0) {
+        return NextResponse.json({ error: "No valid images provided" }, { status: 400 });
+      }
+      const existing = Array.isArray((ticket as { attachments?: unknown }).attachments)
+        ? ((ticket as { attachments?: ImageAttachment[] }).attachments ?? [])
+        : [];
+      const merged = [...existing, ...incoming].slice(0, 24);
+      update.attachments = merged;
+    }
 
     if (body.assign !== undefined) {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       update.assignedDoctorId = body.assign ? session.userId : null;
     }
     // Allow updating diagnosis/medication notes after ticket creation.
     if (body.diagnosis !== undefined || body.medicationNotes !== undefined) {
+      if (!isAdmin && !isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       const currentDiagnosis = typeof ticket.diagnosis === "string" ? ticket.diagnosis : "";
       let baseLines = currentDiagnosis
         ? currentDiagnosis.split("\n").filter((l: string) => !l.trim().toLowerCase().startsWith("medicationnotes:"))
@@ -165,6 +226,7 @@ export async function PATCH(
       update.diagnosis = mergedLines.join("\n");
     }
     if (body.addMessage != null && typeof body.addMessage === "string") {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const messages = Array.isArray(ticket.messages) ? [...ticket.messages] : [];
       messages.push({
@@ -185,6 +247,7 @@ export async function PATCH(
       });
     }
     if (body.requestDoc != null && typeof body.requestDoc === "string") {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const messages = Array.isArray(ticket.messages) ? [...ticket.messages] : [];
       const hasMedicine = messages.some((m: { from?: string; text?: string }) => m.from === "vet" && (m.text ?? "").startsWith("Medicine recommended:"));
@@ -212,6 +275,7 @@ export async function PATCH(
       ? body.requestDocs.filter((t: unknown) => typeof t === "string" && String(t).trim().length > 0).map((t: string) => String(t).trim())
       : [];
     if (requestDocsArray.length > 0) {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const messages = Array.isArray(ticket.messages) ? [...ticket.messages] : [];
       const hasMedicine = messages.some((m: { from?: string; text?: string }) => m.from === "vet" && (m.text ?? "").startsWith("Medicine recommended:"));
@@ -238,6 +302,7 @@ export async function PATCH(
       });
     }
     if (body.recommendMedicine != null && typeof body.recommendMedicine === "string") {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const text = body.recommendMedicine.trim();
       if (text) {
@@ -263,12 +328,14 @@ export async function PATCH(
       }
     }
     if (body.close === true) {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       update.status = "closed";
       update.closedAt = new Date();
       update.nextSteps = body.nextSteps ?? ticket.nextSteps ?? null;
     }
     if (body.suggestMeetAndClose === true) {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const messages = Array.isArray(ticket.messages) ? [...ticket.messages] : [];
       const hasMedicine = messages.some((m: { from?: string; text?: string }) => m.from === "vet" && (m.text ?? "").startsWith("Medicine recommended:"));
@@ -317,6 +384,7 @@ export async function PATCH(
       }
     }
     if (body.rescheduleAppointment === true && body.appointmentTime) {
+      if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       if (!isAssignedToMe) return NextResponse.json({ error: "Assign the consultation to yourself first" }, { status: 403 });
       const rescheduleMessages = Array.isArray(ticket.messages) ? ticket.messages : [];
       const hasMedicineReschedule = rescheduleMessages.some((m: { from?: string; text?: string }) => m.from === "vet" && (m.text ?? "").startsWith("Medicine recommended:"));

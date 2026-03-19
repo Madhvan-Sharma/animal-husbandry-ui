@@ -3,6 +3,49 @@ import { getDb } from "@/lib/mongodb";
 import { getSessionFromRequest } from "@/lib/auth-server";
 import { scheduleTicketCreatedEmail } from "@/lib/scheduler";
 
+type ImageAttachment = {
+  type: "image";
+  mimeType: string;
+  data: string; // base64
+  metadata?: { name?: string; filename?: string };
+};
+
+function sanitizeImageAttachments(input: unknown): ImageAttachment[] {
+  if (!Array.isArray(input)) return [];
+  const out: ImageAttachment[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const type = (item as { type?: unknown }).type;
+    const mimeType = (item as { mimeType?: unknown }).mimeType;
+    const data = (item as { data?: unknown }).data;
+    if (type !== "image") continue;
+    if (typeof mimeType !== "string" || !mimeType.startsWith("image/")) continue;
+    if (typeof data !== "string" || data.length < 8) continue;
+    // ~3MB base64 payload max per image (roughly 2.25MB binary).
+    if (data.length > 3_000_000) continue;
+    const metadata = (item as { metadata?: unknown }).metadata;
+    const name =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { name?: unknown }).name
+        : undefined;
+    const filename =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { filename?: unknown }).filename
+        : undefined;
+    out.push({
+      type: "image",
+      mimeType,
+      data,
+      metadata: {
+        ...(typeof name === "string" ? { name: name.slice(0, 200) } : {}),
+        ...(typeof filename === "string" ? { filename: filename.slice(0, 200) } : {}),
+      },
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 const SEVERITY_ORDER: Record<string, number> = {
   critical: 4,
   high: 3,
@@ -105,6 +148,7 @@ export async function POST(request: NextRequest) {
       country,
       patientId,
       severity,
+      attachments,
     } = body as {
       userId?: string;
       symptoms?: string[];
@@ -129,6 +173,7 @@ export async function POST(request: NextRequest) {
       country?: string;
       patientId?: string;
       severity?: string;
+      attachments?: unknown;
     };
 
     if (!userId || !address) {
@@ -187,6 +232,7 @@ export async function POST(request: NextRequest) {
       status: "open",
       messages: [],
       docRequests: [],
+      attachments: sanitizeImageAttachments(attachments),
       // Tickets start unassigned; admins assign them to a doctor explicitly.
       assignedDoctorId: null,
       createdAt: new Date(),

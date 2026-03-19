@@ -37,6 +37,11 @@ function getConsultationSuggestionKeywords(): string[] {
  */
 export function contentSuggestsConsultation(content: string): boolean {
   if (!content || typeof content !== "string") return false;
+
+  // Language-independent internal marker injected by system prompts.
+  // We strip this marker from what the user sees, but keep it for UI detection.
+  if (content.includes("<<TICKET_REQUIRED>>")) return true;
+
   const lower = content.toLowerCase();
   const keywords = getConsultationSuggestionKeywords();
   return keywords.some((keyword) => lower.includes(keyword));

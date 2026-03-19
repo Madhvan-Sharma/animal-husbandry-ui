@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,11 +11,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, X, Loader2 } from "lucide-react";
+import { Plus, X, Loader2, Image as ImageIcon, Upload } from "lucide-react";
 import { getUserId } from "@/lib/user-id";
 import { toast } from "sonner";
 import { useStreamContext } from "@/providers/Stream";
 import { Badge } from "@/components/ui/badge";
+import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
+import { fileToContentBlock, isBase64ContentBlock, type ContentBlock } from "@/lib/multimodal-utils";
 
 interface CreateTicketDialogProps {
   open: boolean;
@@ -71,6 +73,28 @@ export function CreateTicketDialog({
   const [diagnosisRelevantMessages, setDiagnosisRelevantMessages] = useState<string[]>([]);
   const [diagnosisSeverity, setDiagnosisSeverity] = useState<"low" | "medium" | "high" | "critical">("medium");
   const [diagnosisAnimalType, setDiagnosisAnimalType] = useState<string>("");
+  const imageUploadRef = useRef<HTMLInputElement>(null);
+  const [extraImages, setExtraImages] = useState<ContentBlock[]>([]);
+
+  const chatImages = useMemo(() => {
+    const blocks: ContentBlock[] = [];
+    for (const msg of stream.messages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const b of msg.content) {
+        if (isBase64ContentBlock(b)) blocks.push(b);
+      }
+    }
+    // de-dupe by mime+data prefix
+    const seen = new Set<string>();
+    const deduped: ContentBlock[] = [];
+    for (const b of blocks) {
+      const key = `${b.mimeType}:${b.data.slice(0, 48)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(b);
+    }
+    return deduped.slice(0, 12);
+  }, [stream.messages]);
 
   useEffect(() => {
     if (open) {
@@ -95,6 +119,7 @@ export function CreateTicketDialog({
       setDiagnosisRelevantMessages([]);
       setDiagnosisSeverity("medium");
       setDiagnosisAnimalType("");
+      setExtraImages([]);
 
       const sessionId = stream.sessionId;
       const hasChatHistory = stream.messages.length > 0;
@@ -183,6 +208,7 @@ export function CreateTicketDialog({
     setSubmitting(true);
     try {
       const userId = getUserId();
+      const attachments = [...chatImages, ...extraImages].slice(0, 24);
       const res = await fetch("/api/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -196,6 +222,7 @@ export function CreateTicketDialog({
             durationOfSymptoms: diagnosisDuration || undefined,
             relevantMessages: diagnosisRelevantMessages,
           },
+          attachments,
           patientName: patientName.trim() || undefined,
           patientAge: patientAge.trim() || undefined,
           patientGender: patientGender.trim() || undefined,
@@ -222,6 +249,21 @@ export function CreateTicketDialog({
       toast.error(err instanceof Error ? err.message : "Failed to request consultation");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePickImages = async (files: File[]) => {
+    if (files.length === 0) return;
+    const supported = files.filter((f) => f.type.startsWith("image/"));
+    if (supported.length === 0) {
+      toast.error("Please select image files (PNG/JPEG/WEBP/GIF).");
+      return;
+    }
+    try {
+      const blocks = await Promise.all(supported.slice(0, 8).map((f) => fileToContentBlock(f)));
+      setExtraImages((prev) => [...prev, ...blocks].slice(0, 12));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to read image");
     }
   };
 
@@ -304,6 +346,107 @@ export function CreateTicketDialog({
                   placeholder="User ID"
                   className="h-10 bg-muted/80 cursor-not-allowed border-border/80"
                 />
+              </div>
+            </section>
+
+            {/* Contact & location (editable) */}
+            <section className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground tracking-tight">
+                Contact & location
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="address" className="text-sm font-medium text-muted-foreground">
+                    Address <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="address"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Village, street, landmark…"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="city" className="text-sm font-medium text-muted-foreground">
+                    City
+                  </Label>
+                  <Input
+                    id="city"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="City"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="state" className="text-sm font-medium text-muted-foreground">
+                    State
+                  </Label>
+                  <Input
+                    id="state"
+                    value={state}
+                    onChange={(e) => setState(e.target.value)}
+                    placeholder="State"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="zip" className="text-sm font-medium text-muted-foreground">
+                    ZIP
+                  </Label>
+                  <Input
+                    id="zip"
+                    value={zip}
+                    onChange={(e) => setZip(e.target.value)}
+                    placeholder="ZIP"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="country" className="text-sm font-medium text-muted-foreground">
+                    Country
+                  </Label>
+                  <Input
+                    id="country"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="Country"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone" className="text-sm font-medium text-muted-foreground">
+                    Phone
+                  </Label>
+                  <Input
+                    id="phone"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91…"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-sm font-medium text-muted-foreground">
+                    Email
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@email.com"
+                    className="h-10"
+                    disabled={submitting}
+                  />
+                </div>
               </div>
             </section>
 
@@ -454,6 +597,80 @@ export function CreateTicketDialog({
                 )}
               </div>
             </section>
+
+            {/* Images */}
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                  Images
+                </h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={imageUploadRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={async (e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      await handlePickImages(files);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => imageUploadRef.current?.click()}
+                    disabled={submitting}
+                  >
+                    <Upload className="h-4 w-4 mr-1.5" />
+                    Add images
+                  </Button>
+                </div>
+              </div>
+
+              {chatImages.length > 0 && (
+                <div className="rounded-xl border border-border/70 bg-muted/10 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    From chat ({chatImages.length})
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {chatImages.map((b, idx) => (
+                      <MultimodalPreview key={`chat-${idx}`} block={b} size="md" />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-xl border border-border/70 bg-background/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Additional uploads ({extraImages.length})
+                </p>
+                {extraImages.length === 0 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Optional. Add photos (wounds, reports, animal condition) to help the vet.
+                  </p>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {extraImages.map((b, idx) => (
+                      <MultimodalPreview
+                        key={`extra-${idx}`}
+                        block={b}
+                        size="md"
+                        removable
+                        onRemove={() => setExtraImages((prev) => prev.filter((_, i) => i !== idx))}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Images are included with the ticket so admins and vets can view them.
+              </p>
+            </section>
           </div>
 
           <DialogFooter className="shrink-0 px-6 py-4 border-t border-border/60 bg-muted/20 flex-row gap-3">
@@ -467,7 +684,7 @@ export function CreateTicketDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={submitting} className="min-w-[160px]">
-              {submitting ? "Creating..." : "Create Case"}
+              {submitting ? "Creating..." : "Create ticket"}
             </Button>
           </DialogFooter>
         </form>
