@@ -123,7 +123,13 @@ export async function GET(request: NextRequest) {
         _id: String(t._id),
         severity: t.severity ?? "medium",
       }));
-      withSeverity.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+      withSeverity.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt as Date | string).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt as Date | string).getTime() : 0;
+        const dateDiff = dateB - dateA;
+        if (dateDiff !== 0) return dateDiff;
+        return severityRank(b.severity) - severityRank(a.severity);
+      });
       return NextResponse.json(withSeverity);
     }
 

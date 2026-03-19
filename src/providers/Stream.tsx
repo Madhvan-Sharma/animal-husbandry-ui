@@ -17,6 +17,9 @@ import { fetchEventSource } from "@microsoft/fetch-event-source";
 
 type ChatHistoryItem = { role: "user" | "assistant"; content: string };
 
+/** When the user attaches an image but sends no text, the backend still needs a user prompt. */
+const EMPTY_IMAGE_USER_FALLBACK = "Analyze this image";
+
 // Simplified message type for Langflow
 export interface Message {
   id: string;
@@ -142,13 +145,19 @@ const StreamSession = ({
         abortControllerRef.current = null;
       }
 
+      const trimmedInput = input.trim();
+      const hasImage = contentBlocks.some((b) => b.type === "image");
+      // Sent to the API only; do not put this string in humanMessage — users should not see it.
+      const effectiveUserText =
+        trimmedInput || (hasImage ? EMPTY_IMAGE_USER_FALLBACK : "");
+
       let humanMessageContent: string | (string | ContentBlock)[];
       if (contentBlocks.length > 0) {
-        humanMessageContent = input.trim()
-          ? [input.trim(), ...contentBlocks]
+        humanMessageContent = trimmedInput
+          ? [trimmedInput, ...contentBlocks]
           : contentBlocks;
       } else {
-        humanMessageContent = input.trim();
+        humanMessageContent = trimmedInput;
       }
 
       const humanMessage: Message = {
@@ -198,7 +207,6 @@ const StreamSession = ({
         const requestId = crypto.randomUUID();
 
         const aiMessageId = crypto.randomUUID();
-        const hasImage = contentBlocks.some((b) => b.type === "image");
         setMessages((prev) => [
           ...prev,
           {
@@ -211,7 +219,7 @@ const StreamSession = ({
         ]);
 
         const formData = new FormData();
-        formData.append("user_input", input.trim());
+        formData.append("user_input", effectiveUserText);
 
         // Provide conversation memory to the backend (so GPT can keep context).
         // Keep it lightweight: last 24 messages (including this human message).

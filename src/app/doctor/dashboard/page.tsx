@@ -606,11 +606,11 @@ export default function VetDashboardPage() {
   const low = bySeverityAll.low ?? 0;
 
   const openTicketsSorted = [...openTickets].sort((a, b) => {
-    const rankDiff = severityRank(b.severity) - severityRank(a.severity);
-    if (rankDiff !== 0) return rankDiff;
     const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return dateB - dateA;
+    const dateDiff = dateB - dateA;
+    if (dateDiff !== 0) return dateDiff;
+    return severityRank(b.severity) - severityRank(a.severity);
   });
   const matchesCategory = (t: Ticket) =>
     categoryFilter === "all" || (t.ticketCategory ?? "general") === categoryFilter;
@@ -623,7 +623,9 @@ export default function VetDashboardPage() {
     .sort((a, b) => {
       const dateA = (a.closedAt || a.createdAt) ? new Date((a.closedAt || a.createdAt) as string).getTime() : 0;
       const dateB = (b.closedAt || b.createdAt) ? new Date((b.closedAt || b.createdAt) as string).getTime() : 0;
-      return dateB - dateA;
+      const dateDiff = dateB - dateA;
+      if (dateDiff !== 0) return dateDiff;
+      return severityRank(b.severity) - severityRank(a.severity);
     });
   const filteredClosedTickets = closedTickets.filter(matchesCategory);
 
