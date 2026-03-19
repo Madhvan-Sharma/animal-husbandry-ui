@@ -8,6 +8,7 @@ export interface ContentBlock {
   metadata?: {
     name?: string;
     filename?: string;
+    documentType?: string;
   };
 }
 

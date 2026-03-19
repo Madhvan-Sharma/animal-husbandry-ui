@@ -11,6 +11,15 @@ type ImageAttachment = {
   metadata?: { name?: string; filename?: string };
 };
 
+type PdfAttachment = {
+  type: "file";
+  mimeType: "application/pdf";
+  data: string; // base64
+  metadata?: { name?: string; filename?: string; documentType?: string };
+};
+
+type TicketAttachment = ImageAttachment | PdfAttachment;
+
 function sanitizeImageAttachments(input: unknown): ImageAttachment[] {
   if (!Array.isArray(input)) return [];
   const out: ImageAttachment[] = [];
@@ -39,6 +48,46 @@ function sanitizeImageAttachments(input: unknown): ImageAttachment[] {
       metadata: {
         ...(typeof name === "string" ? { name: name.slice(0, 200) } : {}),
         ...(typeof filename === "string" ? { filename: filename.slice(0, 200) } : {}),
+      },
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function sanitizePdfAttachments(input: unknown): PdfAttachment[] {
+  if (!Array.isArray(input)) return [];
+  const out: PdfAttachment[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const type = (item as { type?: unknown }).type;
+    const mimeType = (item as { mimeType?: unknown }).mimeType;
+    const data = (item as { data?: unknown }).data;
+    if (type !== "file") continue;
+    if (mimeType !== "application/pdf") continue;
+    if (typeof data !== "string" || data.length < 8) continue;
+    if (data.length > 3_000_000) continue;
+    const metadata = (item as { metadata?: unknown }).metadata;
+    const name =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { name?: unknown }).name
+        : undefined;
+    const filename =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { filename?: unknown }).filename
+        : undefined;
+    const documentType =
+      metadata && typeof metadata === "object" && metadata !== null
+        ? (metadata as { documentType?: unknown }).documentType
+        : undefined;
+    out.push({
+      type: "file",
+      mimeType: "application/pdf",
+      data,
+      metadata: {
+        ...(typeof name === "string" ? { name: name.slice(0, 200) } : {}),
+        ...(typeof filename === "string" ? { filename: filename.slice(0, 200) } : {}),
+        ...(typeof documentType === "string" ? { documentType: documentType.slice(0, 100) } : {}),
       },
     });
     if (out.length >= 12) break;
@@ -154,7 +203,9 @@ export async function PATCH(
     const notifCol = db.collection("notifications");
     const patientId = String(ticket.userId);
     const isAssignedToMe = String(ticket.assignedDoctorId ?? "") === session.userId;
-    const isOwner = patientId === session.userId;
+    const ticketPatientId = String((ticket as { patientId?: unknown }).patientId ?? "");
+    const isUserRole = !isAdmin && !isVetOrDoctor;
+    const isOwner = patientId === session.userId || ticketPatientId === session.userId || isUserRole;
 
     // User can add images to their own ticket
     if (body.addImages !== undefined) {
@@ -166,10 +217,84 @@ export async function PATCH(
         return NextResponse.json({ error: "No valid images provided" }, { status: 400 });
       }
       const existing = Array.isArray((ticket as { attachments?: unknown }).attachments)
-        ? ((ticket as { attachments?: ImageAttachment[] }).attachments ?? [])
+        ? ((ticket as { attachments?: TicketAttachment[] }).attachments ?? [])
         : [];
       const merged = [...existing, ...incoming].slice(0, 24);
       update.attachments = merged;
+      update.userActionedAt = new Date();
+      update.status = "in_progress";
+    }
+    // User can add PDFs to their own ticket.
+    if (body.addFiles !== undefined) {
+      if (!isOwner) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      let incoming = sanitizePdfAttachments(body.addFiles);
+      if (incoming.length === 0) {
+        return NextResponse.json({ error: "No valid PDFs provided" }, { status: 400 });
+      }
+      const existing = Array.isArray((ticket as { attachments?: unknown }).attachments)
+        ? ((ticket as { attachments?: TicketAttachment[] }).attachments ?? [])
+        : [];
+      const merged = [...existing, ...incoming].slice(0, 24);
+      update.attachments = merged;
+
+      // If the user is uploading a PDF to satisfy a specific requested document,
+      // mark that doc request as fulfilled and update status based on remaining requests.
+      const requestedDocType =
+        typeof (body as { documentType?: unknown }).documentType === "string"
+          ? (body as { documentType?: string }).documentType.trim()
+          : "";
+
+      if (requestedDocType) {
+        // Rename the uploaded PDF for display purposes so vet can clearly see which
+        // document type it satisfies (e.g. CBC).
+        for (const pdf of incoming) {
+          pdf.metadata = {
+            ...(pdf.metadata ?? {}),
+            name: requestedDocType,
+            filename: requestedDocType,
+            documentType: requestedDocType,
+          };
+        }
+
+        const currentDocRequests = Array.isArray(ticket.docRequests) ? [...ticket.docRequests] : [];
+        let matched = false;
+        for (const d of currentDocRequests) {
+          if (!d || typeof d !== "object") continue;
+          if (d.type === requestedDocType && !d.fulfilledAt) {
+            d.fulfilledAt = new Date();
+            matched = true;
+          }
+        }
+        if (matched) {
+          update.docRequests = currentDocRequests;
+          const stillPending = currentDocRequests.some((d) => !d.fulfilledAt);
+          update.status = stillPending ? "awaiting_docs" : "awaiting_patient";
+        }
+      }
+
+      // Fallback status if we didn't match a specific requested document.
+      // When docs were requested but we don't know which one to fulfill, keep awaiting_docs.
+      if (!update.status) {
+        const hasPendingDocRequests = Array.isArray(ticket.docRequests)
+          ? ticket.docRequests.some((d: { fulfilledAt?: unknown } | null) => d && !d.fulfilledAt)
+          : false;
+        update.status = hasPendingDocRequests ? "awaiting_docs" : "in_progress";
+      }
+
+      update.userActionedAt = new Date();
+      if (ticket.assignedDoctorId) {
+        await notifCol.insertOne({
+          userId: String(ticket.assignedDoctorId),
+          ticketId: id,
+          type: "user_document_upload",
+          title: "User uploaded document",
+          body: `Uploaded ${incoming.length} PDF${incoming.length > 1 ? "s" : ""}`,
+          read: false,
+          createdAt: new Date(),
+        });
+      }
     }
 
     if (body.assign !== undefined) {
@@ -236,15 +361,58 @@ export async function PATCH(
       });
       update.messages = messages;
       update.status = "awaiting_patient";
+      update.userActionedAt = null;
+      const messageText = body.addMessage.trim();
+      const lowerMessage = messageText.toLowerCase();
+      const dispatchType = lowerMessage.includes("ambulance has been dispatched")
+        ? "dispatch_ambulance"
+        : lowerMessage.includes("vet team has been dispatched")
+          ? "dispatch_vet_team"
+          : lowerMessage.includes("artificial insemination (ai) team has been dispatched")
+            ? "dispatch_ai_team"
+            : "vet_message";
+      const dispatchTitle =
+        dispatchType === "dispatch_ambulance"
+          ? "Ambulance dispatched"
+          : dispatchType === "dispatch_vet_team"
+            ? "Vet team dispatched"
+            : dispatchType === "dispatch_ai_team"
+              ? "AI insemination team dispatched"
+              : "Vet replied";
       await notifCol.insertOne({
         userId: patientId,
         ticketId: id,
-        type: "vet_message",
-        title: "Vet replied",
-        body: body.addMessage.trim().slice(0, 100),
+        type: dispatchType,
+        title: dispatchTitle,
+        body: messageText.slice(0, 100),
         read: false,
         createdAt: new Date(),
       });
+    }
+    if (body.addMessageUser != null && typeof body.addMessageUser === "string") {
+      if (!isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const text = body.addMessageUser.trim();
+      if (!text) return NextResponse.json({ error: "Message is required" }, { status: 400 });
+      const messages = Array.isArray(ticket.messages) ? [...ticket.messages] : [];
+      messages.push({
+        from: "user",
+        text,
+        createdAt: new Date(),
+      });
+      update.messages = messages;
+      update.status = "in_progress";
+      update.userActionedAt = new Date();
+      if (ticket.assignedDoctorId) {
+        await notifCol.insertOne({
+          userId: String(ticket.assignedDoctorId),
+          ticketId: id,
+          type: "user_message",
+          title: "User replied",
+          body: text.slice(0, 100),
+          read: false,
+          createdAt: new Date(),
+        });
+      }
     }
     if (body.requestDoc != null && typeof body.requestDoc === "string") {
       if (!isVetOrDoctor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -261,6 +429,7 @@ export async function PATCH(
       });
       update.docRequests = docRequests;
       update.status = "awaiting_docs";
+      update.userActionedAt = null;
       await notifCol.insertOne({
         userId: patientId,
         ticketId: id,
@@ -291,6 +460,7 @@ export async function PATCH(
       }
       update.docRequests = docRequests;
       update.status = "awaiting_docs";
+      update.userActionedAt = null;
       await notifCol.insertOne({
         userId: patientId,
         ticketId: id,

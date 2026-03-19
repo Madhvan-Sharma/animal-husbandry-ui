@@ -75,6 +75,7 @@ type Ticket = {
   diagnosis?: string;
   severity?: string;
   status?: string;
+  userActionedAt?: string | null;
   messages?: { from: string; text: string; createdAt: string }[];
   docRequests?: { type: string; requestedAt: string; fulfilledAt?: string | null }[];
   attachments?: ContentBlock[];
@@ -279,6 +280,32 @@ export default function VetDashboardPage() {
       });
     return () => {
       cancelled = true;
+    };
+  }, [selected]);
+
+  // Refresh tickets when another client updates (e.g. user uploads/replies).
+  useEffect(() => {
+    const onTicketsRefresh = async () => {
+      setLoading(true);
+      try {
+        const data = await fetch("/api/tickets?forVet=1").then((r) => r.json());
+        if (Array.isArray(data)) {
+          setTickets(data);
+          if (selected) {
+            const updated = data.find((t: Ticket) => t._id === selected._id);
+            if (updated) setSelected(updated);
+          }
+        }
+      } catch {
+        // Keep existing UI on transient errors
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    window.addEventListener("tickets:refresh", onTicketsRefresh);
+    return () => {
+      window.removeEventListener("tickets:refresh", onTicketsRefresh);
     };
   }, [selected]);
 
@@ -864,7 +891,16 @@ export default function VetDashboardPage() {
                               {t.severity ?? "medium"}
                             </span>
                           </td>
-                          <td className="py-3.5 px-4 capitalize text-muted-foreground">{t.status ?? "open"}</td>
+                          <td className="py-3.5 px-4 capitalize text-muted-foreground">
+                            <div className="flex flex-col items-start gap-1">
+                              <span>{t.status ?? "open"}</span>
+                              {!!t.userActionedAt && (
+                                <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-wide text-emerald-700 dark:text-emerald-400">
+                                  User actioned
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-3.5 px-4 max-w-[200px] truncate text-muted-foreground">
                             {Array.isArray(t.symptoms) && t.symptoms.length > 0
                               ? t.symptoms.join(", ")
@@ -1182,17 +1218,50 @@ export default function VetDashboardPage() {
                 {/* Images */}
                 {Array.isArray(selected.attachments) && selected.attachments.length > 0 && (
                   <section className="space-y-3">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <FileText className="size-4" />
-                      <h3 className="text-xs font-semibold uppercase tracking-wider">Images</h3>
-                    </div>
-                    <div className="rounded-xl border border-border bg-muted/15 p-4">
-                      <div className="flex flex-wrap gap-2">
-                        {selected.attachments.map((b, idx) => (
-                          <MultimodalPreview key={idx} block={b} size="lg" />
-                        ))}
-                      </div>
-                    </div>
+                    {(() => {
+                      const imageAttachments = selected.attachments.filter(
+                        (b) => b.type === "image" && typeof b.mimeType === "string" && b.mimeType.startsWith("image/"),
+                      );
+                      const pdfAttachments = selected.attachments.filter(
+                        (b) => b.type === "file" && b.mimeType === "application/pdf",
+                      );
+
+                      return (
+                        <>
+                          {imageAttachments.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <FileText className="size-4" />
+                                <h3 className="text-xs font-semibold uppercase tracking-wider">Images</h3>
+                              </div>
+                              <div className="rounded-xl border border-border bg-muted/15 p-4">
+                                <div className="flex flex-wrap gap-2">
+                                  {imageAttachments.map((b, idx) => (
+                                    <MultimodalPreview key={`img-${idx}`} block={b} size="lg" />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {pdfAttachments.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <FileText className="size-4" />
+                                <h3 className="text-xs font-semibold uppercase tracking-wider">PDF documents</h3>
+                              </div>
+                              <div className="rounded-xl border border-border bg-muted/15 p-4">
+                                <div className="flex flex-wrap gap-2">
+                                  {pdfAttachments.map((b, idx) => (
+                                    <MultimodalPreview key={`pdf-${idx}`} block={b} size="lg" />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </section>
                 )}
 
@@ -1203,19 +1272,32 @@ export default function VetDashboardPage() {
                       <MessageSquare className="size-4" />
                       <h3 className="text-xs font-semibold uppercase tracking-wider">Conversation</h3>
                     </div>
-                    <ul className="space-y-2">
+                    <ul className="space-y-2.5 rounded-xl border border-border bg-background/50 p-3">
                       {selected.messages.map((m, i) => (
-                        <li
-                          key={i}
-                          className={cn(
-                            "rounded-lg px-3 py-2.5 text-sm",
-                            m.from === "vet" || m.from === "doctor"
-                              ? "ml-4 bg-primary/10 border border-primary/20 text-foreground"
-                              : "mr-4 bg-muted/50 border border-border text-foreground"
-                          )}
-                        >
-                          <span className="font-medium capitalize text-muted-foreground text-xs">{m.from}</span>
-                          <p className="mt-0.5">{m.text}</p>
+                        <li key={i} className={cn("flex", m.from === "vet" || m.from === "doctor" ? "justify-end" : "justify-start")}>
+                          <div
+                            className={cn(
+                              "max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm shadow-sm",
+                              m.from === "vet" || m.from === "doctor"
+                                ? "bg-primary/12 border border-primary/25 text-foreground"
+                                : "bg-muted/60 border border-border text-foreground"
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-semibold capitalize text-[11px] text-muted-foreground">{m.from}</span>
+                              {m.createdAt && (
+                                <span className="text-[10px] text-muted-foreground/80 whitespace-nowrap">
+                                  {new Date(m.createdAt).toLocaleString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{m.text}</p>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -1230,19 +1312,44 @@ export default function VetDashboardPage() {
                       <h3 className="text-xs font-semibold uppercase tracking-wider">Document requests</h3>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {selected.docRequests.map((d, i) => (
-                        <span
-                          key={i}
-                          className={cn(
-                            "inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-medium border",
-                            d.fulfilledAt
-                              ? "bg-green-500/10 border-green-500/20 text-green-700 dark:text-green-400"
-                              : "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                          )}
-                        >
-                          {d.type} · {d.fulfilledAt ? "Fulfilled" : "Pending"}
-                        </span>
-                      ))}
+                      {selected.docRequests.map((d, i) => {
+                        const uploadedForType =
+                          Array.isArray(selected.attachments) && selected.attachments.length > 0
+                            ? selected.attachments.filter(
+                                (b) =>
+                                  b.type === "file" &&
+                                  b.mimeType === "application/pdf" &&
+                                  (b.metadata as { documentType?: string } | undefined)?.documentType === d.type,
+                              )
+                            : [];
+
+                        const displayName =
+                          uploadedForType.length > 0
+                            ? String(uploadedForType[0]?.metadata?.filename ?? uploadedForType[0]?.metadata?.name ?? d.type)
+                            : d.type;
+
+                        return (
+                          <div key={i} className="flex flex-col">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-medium border",
+                                d.fulfilledAt
+                                  ? "bg-green-500/10 border-green-500/20 text-green-700 dark:text-green-400"
+                                  : "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400",
+                              )}
+                            >
+                              {displayName} · {d.fulfilledAt ? "Fulfilled" : "Pending"}
+                            </span>
+                            {uploadedForType.length > 0 && (
+                              <div className="mt-2 space-y-2">
+                                {uploadedForType.map((b, idx) => (
+                                  <MultimodalPreview key={`${d.type}-${idx}`} block={b} size="sm" />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </section>
                 )}

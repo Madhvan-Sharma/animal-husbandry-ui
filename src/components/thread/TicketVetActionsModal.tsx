@@ -17,12 +17,14 @@ import {
   ClipboardList,
   Image as ImageIcon,
   Upload,
+  SendHorizontal,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
-import { fileToContentBlock, type ContentBlock } from "@/lib/multimodal-utils";
+import { fileToBase64, fileToContentBlock, type ContentBlock } from "@/lib/multimodal-utils";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 
 export interface TicketForActions {
@@ -45,7 +47,7 @@ export interface TicketForActions {
 }
 
 type TimelineEvent = {
-  type: "created" | "vet_message" | "doc_request" | "medicine" | "appointment" | "closed";
+  type: "created" | "vet_message" | "user_message" | "doc_request" | "medicine" | "appointment" | "closed";
   date: Date;
   label: string;
   detail?: string;
@@ -64,10 +66,17 @@ function buildTimeline(ticket: TicketForActions): TimelineEvent[] {
 
   const messages = ticket.messages ?? [];
   for (const m of messages) {
-    if (m.from !== "vet" && m.from !== "doctor") continue;
+    if (m.from !== "vet" && m.from !== "doctor" && m.from !== "user") continue;
     const isMedicine = m.text.startsWith("Medicine recommended:");
     const date = m.createdAt ? new Date(m.createdAt) : new Date(0);
-    if (isMedicine) {
+    if (m.from === "user") {
+      events.push({
+        type: "user_message",
+        date,
+        label: "User replied",
+        detail: m.text,
+      });
+    } else if (isMedicine) {
       events.push({
         type: "medicine",
         date,
@@ -134,6 +143,11 @@ const eventConfig: Record<
     color: "text-primary",
     bg: "bg-primary/10 border-primary/30",
   },
+  user_message: {
+    icon: MessageSquare,
+    color: "text-blue-700 dark:text-blue-300",
+    bg: "bg-blue-500/10 border-blue-500/30",
+  },
   doc_request: {
     icon: FileText,
     color: "text-amber-600 dark:text-amber-400",
@@ -168,17 +182,29 @@ export function TicketVetActionsModal({
   onOpenChange,
 }: TicketVetActionsModalProps) {
   const ticketId = ticket?._id ?? "";
+  const [ticketState, setTicketState] = useState<TicketForActions | null>(ticket);
   const [attachments, setAttachments] = useState<ContentBlock[]>(
     Array.isArray(ticket?.attachments) ? (ticket?.attachments as ContentBlock[]) : [],
   );
   const [uploading, setUploading] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [docTypeToUpload, setDocTypeToUpload] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setAttachments(Array.isArray(ticket?.attachments) ? (ticket?.attachments as ContentBlock[]) : []);
-  }, [ticketId, ticket?.attachments]);
+    setTicketState(ticket);
+  }, [ticketId]);
+
+  useEffect(() => {
+    const t = ticketState ?? ticket;
+    setAttachments(Array.isArray(t?.attachments) ? (t?.attachments as ContentBlock[]) : []);
+  }, [ticketId, ticketState?.attachments]);
 
   if (!ticket) return null;
+  const ticketForUi = ticketState ?? ticket;
 
   const handleAddImages = async (files: File[]) => {
     if (files.length === 0) return;
@@ -195,10 +221,12 @@ export function TicketVetActionsModal({
       if (!res.ok) {
         throw new Error((data as { error?: string }).error || "Failed to upload images");
       }
+      setTicketState(data as TicketForActions);
       const updated = Array.isArray((data as { attachments?: unknown }).attachments)
         ? ((data as { attachments?: ContentBlock[] }).attachments ?? [])
         : [...attachments, ...blocks];
       setAttachments(updated);
+      window.dispatchEvent(new Event("tickets:refresh"));
       toast.success(`Added ${blocks.length} image${blocks.length === 1 ? "" : "s"} to the ticket`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to upload images");
@@ -207,24 +235,104 @@ export function TicketVetActionsModal({
     }
   };
 
-  const events = buildTimeline(ticket);
+  const handleAddPdfFiles = async (files: File[], documentType?: string) => {
+    if (files.length === 0) return;
+    if (uploadingPdf) return;
+    const pdfs = files.filter((f) => f.type === "application/pdf");
+    if (pdfs.length === 0) {
+      toast.error("Please select PDF files only.");
+      return;
+    }
+    setUploadingPdf(true);
+    try {
+      const blocks: ContentBlock[] = await Promise.all(
+        pdfs.slice(0, 8).map(async (f) => ({
+          type: "file",
+          mimeType: "application/pdf",
+          data: await fileToBase64(f),
+          metadata: {
+            name: f.name,
+            filename: f.name,
+            ...(documentType ? { documentType } : {}),
+          },
+        })),
+      );
+      const res = await fetch(`/api/tickets/${ticket._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addFiles: blocks, documentType }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error || "Failed to upload PDFs");
+      }
+      setTicketState(data as TicketForActions);
+      const updated = Array.isArray((data as { attachments?: unknown }).attachments)
+        ? ((data as { attachments?: ContentBlock[] }).attachments ?? [])
+        : [...attachments, ...blocks];
+      setAttachments(updated);
+      window.dispatchEvent(new Event("tickets:refresh"));
+      toast.success(`Added ${blocks.length} PDF${blocks.length === 1 ? "" : "s"} to the ticket`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to upload PDF");
+    } finally {
+      setUploadingPdf(false);
+    }
+  };
 
-  const statusLabel = (ticket.status ?? "open").replace(/_/g, " ");
+  const handleUserReply = async () => {
+    const text = replyText.trim();
+    if (!text) return;
+    if (sendingReply) return;
+    setSendingReply(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addMessageUser: text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error || "Failed to send reply");
+      }
+      setTicketState(data as TicketForActions);
+      toast.success("Reply sent to vet");
+      window.dispatchEvent(new Event("tickets:refresh"));
+      setReplyText("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to send reply");
+    } finally {
+      setSendingReply(false);
+    }
+  };
+
+  const events = buildTimeline(ticketForUi);
+
+  const statusLabel = (ticketForUi.status ?? "open").replace(/_/g, " ");
   const severityColors: Record<string, string> = {
     critical: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
     high: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30",
     medium: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
     low: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
   };
-  const severityClass = severityColors[(ticket.severity ?? "medium").toLowerCase()] ?? severityColors.medium;
+  const severityClass = severityColors[(ticketForUi.severity ?? "medium").toLowerCase()] ?? severityColors.medium;
   const categoryLabel =
-    (ticket.ticketCategory ?? "general") === "artificial_insemination"
+    (ticketForUi.ticketCategory ?? "general") === "artificial_insemination"
       ? "Artificial Insemination"
       : "General";
   const categoryClass =
-    (ticket.ticketCategory ?? "general") === "artificial_insemination"
+    (ticketForUi.ticketCategory ?? "general") === "artificial_insemination"
       ? "border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400"
       : "border-slate-400/30 bg-slate-500/10 text-slate-700 dark:text-slate-300";
+  const imageAttachments = attachments.filter(
+    (a) => a.type === "image" && typeof a.mimeType === "string" && a.mimeType.startsWith("image/"),
+  );
+  const pdfAttachments = attachments.filter(
+    (a) => a.type === "file" && a.mimeType === "application/pdf",
+  );
+  const normalizedStatus = (ticketForUi.status ?? "").toLowerCase();
+  const isAwaitingPatient = normalizedStatus === "awaiting_patient";
+  const isAwaitingDocs = normalizedStatus === "awaiting_docs";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -315,40 +423,34 @@ export function TicketVetActionsModal({
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <ImageIcon className="size-3.5" />
-                    Images
+                    Attachments
                   </h3>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={async (e) => {
-                      const files = e.target.files ? Array.from(e.target.files) : [];
-                      await handleAddImages(files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                  >
-                    <Upload className="size-3.5 mr-1.5" />
-                    Add
-                  </Button>
                 </div>
                 <div className="rounded-xl border border-border bg-background/80 p-4">
                   {attachments.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No images attached yet.</p>
+                    <p className="text-xs text-muted-foreground">No attachments yet.</p>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {attachments.map((b, idx) => (
-                        <MultimodalPreview key={idx} block={b} size="md" />
-                      ))}
+                    <div className="space-y-3">
+                      {imageAttachments.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Images</p>
+                          <div className="flex flex-wrap gap-2">
+                            {imageAttachments.map((b, idx) => (
+                              <MultimodalPreview key={`img-${idx}`} block={b} size="md" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {pdfAttachments.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-medium text-muted-foreground mb-1.5">PDF documents</p>
+                          <div className="space-y-2">
+                            {pdfAttachments.map((b, idx) => (
+                              <MultimodalPreview key={`pdf-${idx}`} block={b} size="sm" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -358,6 +460,71 @@ export function TicketVetActionsModal({
           {/* Right: Flow / timeline */}
           <div className="overflow-y-auto flex flex-col min-h-0">
             <div className="p-6">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = e.target.files ? Array.from(e.target.files) : [];
+                  await handleAddImages(files);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const files = e.target.files ? Array.from(e.target.files) : [];
+                  await handleAddPdfFiles(files, docTypeToUpload ?? undefined);
+                  e.target.value = "";
+                  setDocTypeToUpload(null);
+                }}
+              />
+              {isAwaitingPatient && (
+                <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Reply to vet
+                  </h3>
+                  <textarea
+                    className="w-full min-h-[84px] rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    placeholder="Write your update or question for the vet..."
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleUserReply}
+                      disabled={!replyText.trim() || sendingReply}
+                    >
+                      {sendingReply ? (
+                        <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <SendHorizontal className="size-3.5 mr-1.5" />
+                      )}
+                      {sendingReply ? "Sending..." : "Send reply"}
+                    </Button>
+                  </div>
+                  {(sendingReply || uploading || uploadingPdf) && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>
+                        {sendingReply
+                          ? "Sending your reply..."
+                          : uploadingPdf
+                            ? "Uploading PDF document..."
+                            : "Uploading image..."}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <h3 className="text-sm font-semibold text-foreground mb-4">Vet actions flow</h3>
               <div className="relative">
                 <div
@@ -414,6 +581,27 @@ export function TicketVetActionsModal({
                                 {event.meta}
                               </span>
                             )}
+                            {event.type === "doc_request" &&
+                              isAwaitingDocs &&
+                              event.meta === "Pending" &&
+                              event.detail && (
+                                <div className="mt-3">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 w-full justify-start gap-2"
+                                    disabled={uploadingPdf}
+                                    onClick={() => {
+                                      setDocTypeToUpload(String(event.detail));
+                                      pdfInputRef.current?.click();
+                                    }}
+                                  >
+                                    <FileText className="size-3.5 shrink-0" />
+                                    {uploadingPdf ? "Uploading..." : `Upload ${String(event.detail)}`}
+                                  </Button>
+                                </div>
+                              )}
                           </div>
                         </div>
                       </li>

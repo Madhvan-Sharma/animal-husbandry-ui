@@ -11,7 +11,7 @@ import {
   Maximize2,
   FileText,
 } from "lucide-react";
-import { useQueryState, parseAsBoolean } from "nuqs";
+import { useQueryState, parseAsBoolean, parseAsString } from "nuqs";
 import {
   Sheet,
   SheetContent,
@@ -62,6 +62,7 @@ export default function Sidebar() {
     "sidebarOpen",
     parseAsBoolean.withDefault(false),
   );
+  const [openTicketId, setOpenTicketId] = useQueryState("openTicketId", parseAsString);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketForActionsModal, setTicketForActionsModal] = useState<Ticket | null>(null);
@@ -92,6 +93,24 @@ export default function Sidebar() {
     if (typeof window === "undefined") return;
     fetchTickets();
   }, [fetchTickets]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      void fetchTickets();
+    };
+    window.addEventListener("tickets:refresh", handler);
+    return () => window.removeEventListener("tickets:refresh", handler);
+  }, [fetchTickets]);
+
+  useEffect(() => {
+    if (!openTicketId) return;
+    const match = tickets.find((t) => t._id === openTicketId);
+    if (!match) return;
+    setTicketForActionsModal(match);
+    setSidebarOpen(true);
+    setOpenTicketId(null);
+  }, [openTicketId, tickets, setOpenTicketId, setSidebarOpen]);
 
   const SEVERITY_COLORS: Record<string, string> = {
     critical: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",

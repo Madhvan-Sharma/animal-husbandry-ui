@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { File, X as XIcon } from "lucide-react";
 import { ContentBlock } from "@/lib/multimodal-utils";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { base64ToBlob } from "@/lib/multimodal-utils";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,29 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   size = "md",
 }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  const isPdfBlock = block.type === "file" && block.mimeType === "application/pdf";
+  const pdfBlob = useMemo(() => {
+    if (!isPdfBlock) return null;
+    try {
+      return base64ToBlob(block.data, block.mimeType);
+    } catch {
+      return null;
+    }
+  }, [isPdfBlock, block.data, block.mimeType]);
+
+  useEffect(() => {
+    if (!pdfBlob) {
+      setPdfUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pdfBlob);
+    setPdfUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pdfBlob]);
 
   // Image block
   if (
@@ -87,7 +111,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   }
 
   // PDF block
-  if (block.type === "file" && block.mimeType === "application/pdf") {
+  if (isPdfBlock) {
     const filename =
       block.metadata?.filename || block.metadata?.name || "PDF file";
     return (
@@ -111,6 +135,16 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
         >
           {String(filename)}
         </span>
+        {pdfUrl && (
+          <a
+            href={pdfUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-2 inline-flex shrink-0 items-center rounded-md border border-teal-500/30 bg-teal-500/10 px-2 py-1 text-[11px] font-semibold text-teal-700 hover:bg-teal-500/15"
+          >
+            View
+          </a>
+        )}
         {removable && (
           <button
             type="button"

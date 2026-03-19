@@ -33,6 +33,10 @@ function getActionForType(type: string): { label: string; icon: React.ReactNode 
       return { label: "View recommendation", icon: <Pill className="size-4" /> };
     case "appointment_scheduled":
       return { label: "View appointment", icon: <CalendarCheck className="size-4" /> };
+    case "dispatch_ambulance":
+    case "dispatch_vet_team":
+    case "dispatch_ai_team":
+      return { label: "View ticket & reply", icon: <MessageSquare className="size-4" /> };
     default:
       return { label: "View ticket", icon: <ChevronRight className="size-4" /> };
   }
@@ -43,6 +47,7 @@ export function NotificationsBell() {
   const [list, setList] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const [, setSidebarOpen] = useQueryState("sidebarOpen", parseAsBoolean.withDefault(false));
+  const [, setOpenTicketId] = useQueryState("openTicketId");
 
   const userId = typeof window !== "undefined" ? getUserId() : "";
   const unread = list.filter((n) => !n.read);
@@ -114,7 +119,15 @@ export function NotificationsBell() {
               <ul className="space-y-3">
                 {list.map((n) => {
                   const action = getActionForType(n.type);
-                  const hasDoctorAsk = ["doc_request", "vet_message", "medicine_recommendation", "appointment_scheduled"].includes(n.type);
+                  const hasDoctorAsk = [
+                    "doc_request",
+                    "vet_message",
+                    "medicine_recommendation",
+                    "appointment_scheduled",
+                    "dispatch_ambulance",
+                    "dispatch_vet_team",
+                    "dispatch_ai_team",
+                  ].includes(n.type);
                   return (
                     <li
                       key={n._id}
@@ -136,6 +149,9 @@ export function NotificationsBell() {
                               variant={!n.read ? "default" : "outline"}
                               className="gap-1.5"
                               onClick={() => {
+                                if (n.ticketId) {
+                                  setOpenTicketId(n.ticketId);
+                                }
                                 handleAction();
                                 if (!n.read) markRead(n._id);
                               }}
